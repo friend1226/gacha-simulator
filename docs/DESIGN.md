@@ -907,7 +907,7 @@ W003은 §7.3의 근거대로 리프 전개 후 선형 부등식 검사로 구�
 
 ### 13.3 테스트 격차 (최우선)
 
-현재 테스트 7개. §9의 검증 항목 중 **가장 중요한 것들이 빠져 있다.**
+현재 테스트 8개(§13.4의 exact 디스패치 회귀 테스트 포함). §9의 검증 항목 중 **가장 중요한 것들이 빠져 있다.**
 
 | 우선순위 | 테스트 | 스펙 | 상태 |
 |---|---|---|---|
@@ -930,3 +930,13 @@ W003은 §7.3의 근거대로 리프 전개 후 선형 부등식 검사로 구�
 **2026-07-27 후속 수정 (Codex)**: 감사에서 발견된 exact 경로 버그 3건을 해소했다. `run_dp`는 `numeric: "exact"`를 BigInt exact 엔진으로 위임하고 CLI/WASM 오류를 전달한다. UI는 exact 선택 시 `run_exact_json`을 호출하며, `ExactResult`는 `numeric: "exact"`와 `clampEvents`를 반환한다. UI에도 보정 횟수를 표시하고 코어·UI 회귀 테스트를 추가했으므로, 해결된 §13.5 목록은 이 절의 원칙에 따라 제거했다.
 
 후속 UI 테스트 4개와 TypeScript/Vite 빌드는 통과했다. 이 Codex 환경에는 Rust 툴체인이 없어 새 Rust 회귀 테스트를 포함한 `cargo test --workspace`는 재실행하지 못했다.
+
+**2026-07-27 PR #2 리뷰 검증**: 위 Codex 수정분을 이 환경에서 직접 빌드·실행해 확인했다.
+
+- `cargo build --workspace`: 성공 (경고는 기존의 `compile.rs:230` dead-code 1건뿐, 신규 경고 없음)
+- `cargo test --workspace`: **8/8 통과** — 신규 `engine_dp::tests::exact_numeric_dispatches_to_bigint_engine_and_reports_clamps` 포함, 기존 7개 회귀 없음
+- `cd ui && npx tsc --noEmit`: 통과
+- `cd ui && npm test`: 4/4 통과
+- 수동 CLI 스모크 테스트: `numeric: "exact"`, 공정한 동전 4회 모델을 `dp` 커맨드로 실행 → 출력이 `"numeric": "exact"`와 분자열 `1, 4, 6, 4, 1`(분모 `16`)을 반환해 이항분포 `B(4, 1/2)`와 정확히 일치함을 확인. `run_dp`가 exact를 선택했을 때 실제로 `run_exact`(공통분모 BigInt 경로)로 위임되고 있음이 실행 결과로도 검증됐다
+
+세 버그(exact 강등, UI 미배선, `clamp_events` 누락) 모두 해결을 코드 검토와 실행 양쪽으로 확인했다. §13.5는 삭제된 상태를 유지한다. 다음 우선순위는 여전히 §13.3의 3대 핵심 테스트다.

@@ -53,3 +53,14 @@
 - exact 디스패치·clamp 보고 코어 테스트와 UI 백엔드 선택 테스트 추가
 - UI 테스트 4개, TypeScript strict 검사, Vite 프로덕션 빌드 통과
 - 후속 Rust 변경은 현재 Codex 환경에 Rust 툴체인이 없어 `cargo test --workspace` 재실행 필요
+
+## 2026-07-27 PR #2 리뷰 (Codex 수정 검증)
+
+PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검증했다.
+
+- `cargo build --workspace`: 성공, 신규 경고 없음 (기존 `EntityDef.name` dead-code 경고 1건만 유지)
+- `cargo test --workspace`: **8/8 통과** (신규 exact 디스패치 테스트 포함) — Codex 환경에서 못 돌렸던 부분 해소
+- `npx tsc --noEmit`, `npm test`(4/4): 통과
+- 수동 스모크 테스트: `numeric: "exact"` 모델을 `dp` 커맨드로 실행 → `"numeric": "exact"` + BigInt 분자(`1,4,6,4,1`)/분모(`16`)로 이항분포와 정확히 일치. exact 강등 버그·UI 미배선 버그·`clamp_events` 누락이 모두 실제로 해결됐음을 확인
+- 코드 수정 없이 문서만 갱신(`docs/DESIGN.md` §13.4에 검증 기록 추가) 후 push
+- 다음 우선순위는 변경 없음: §13.3의 3대 핵심 테스트(MC↔DP 교차검증, exact↔ScaledF64 일치, 지급 전파)
