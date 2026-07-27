@@ -1,13 +1,25 @@
 # Gacha simulator implementation rules
 
-These rules capture the non-negotiable invariants from the implementation specification
-supplied with the project.
+These are the 9 absolute rules from `CLAUDE.md`'s "절대 규칙", mirrored 1:1 in English.
+Keep both files in sync. Source spec: `docs/DESIGN.md` §12.
 
-- Keep probability literals as exact decimal/fraction strings until parsed as rationals.
-- Store counts for mutually exclusive leaves only; entity counts are derived sums.
-- Precompute probability tables before running either engine.
-- Keep DP generic over `Prob`; do not duplicate floating-point engines.
-- Exact DP uses one common denominator per layer and BigInt numerators per cell.
-- A grant is applied after the normal draw and changes only its target leaf count.
-- Monte Carlo output must include Wilson confidence intervals and the seed.
-- Never silently discard pruned mass or probability-clamp events.
+1. Never put `Fraction`/`BigRational` in the DP inner loop. Exact mode uses one common
+   denominator per layer with BigInt numerators only. A GCD call inside the inner loop
+   is a design violation (reduction happens at most once per layer, via `reduce_layers`).
+2. Never parse probability literals as f64. Decimal strings must be parsed directly into
+   rationals; `"0.007".parse::<f64>()` followed by rational conversion is forbidden.
+3. Never duplicate engines per backend. Keep `run_generic::<P: Prob>` as the single
+   generic implementation shared by `engine_mc`/`engine_dp`.
+4. Never store entity counts in state. Only leaf counts are stored; entity counts are
+   derived sums. A grant increments only its target leaf's counter — incrementing an
+   ancestor separately double-counts.
+5. Never evaluate probability expressions inside an engine's inner loop. Always go
+   through the precomputed `prob_table`.
+6. Monte Carlo output must always include a Wilson confidence interval and the seed.
+7. The default snapshot mode is `aggregate`. `full` must never run without explicit
+   confirmation (snapshots themselves are unimplemented until M8; apply this rule once
+   they land).
+8. Never silently discard pruned mass or probability-clamp events. Accumulate and
+   report them in the result.
+9. Do not perform performance optimization until the §13.3 core validation tests pass;
+   that work belongs to M8. Correctness validation comes first.
