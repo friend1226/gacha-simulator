@@ -16,6 +16,8 @@ fn compile_nested_model(
     numeric: &str,
     max_trials: u32,
     triggers: Vec<Value>,
+    parent_probability: &str,
+    child_probability: &str,
 ) -> gacha_core::CompiledModel {
     let ir: ModelIr = serde_json::from_value(json!({
         "irVersion": 1,
@@ -23,11 +25,11 @@ fn compile_nested_model(
         "entities": [{
             "id": "star3",
             "name": "3-star",
-            "prob": { "lit": "1/2" },
+            "prob": { "lit": parent_probability },
             "children": [{
                 "id": "pickup",
                 "name": "pickup",
-                "prob": { "lit": "1/4" }
+                "prob": { "lit": child_probability }
             }]
         }],
         "nestingPolicy": "clampChildren",
@@ -62,7 +64,7 @@ fn run_scaled(model: &gacha_core::CompiledModel) -> DpResult {
 
 #[test]
 fn monte_carlo_and_dp_agree_within_wilson_intervals() {
-    let model = compile_nested_model("scaled", 12, Vec::new());
+    let model = compile_nested_model("scaled", 12, Vec::new(), "0.03", "0.007");
     let dp = run_scaled(&model);
     let mc = run_mc(
         &model,
@@ -213,7 +215,13 @@ fn marginal_star3(result: &DpResult) -> BTreeMap<u32, f64> {
 
 #[test]
 fn pickup_grant_shifts_derived_parent_distribution_by_exactly_one() {
-    let without_grant = run_scaled(&compile_nested_model("scaled", 200, Vec::new()));
+    let without_grant = run_scaled(&compile_nested_model(
+        "scaled",
+        200,
+        Vec::new(),
+        "1/2",
+        "1/4",
+    ));
     let with_grant = run_scaled(&compile_nested_model(
         "scaled",
         200,
@@ -226,6 +234,8 @@ fn pickup_grant_shifts_derived_parent_distribution_by_exactly_one() {
                 "appliesTransitions": false
             }
         })],
+        "1/2",
+        "1/4",
     ));
 
     assert_eq!(
