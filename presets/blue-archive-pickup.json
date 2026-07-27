@@ -1,0 +1,43 @@
+{
+  "$preset": {
+    "game": "Blue Archive",
+    "banner": "픽업 모집",
+    "sourceUrl": "https://bluearchive.nexon.com/",
+    "verifiedDate": "2026-07-01",
+    "confidence": "official",
+    "notes": "200회 모집 포인트 교환을 확정 지급으로 모델링"
+  },
+  "irVersion": 1,
+  "name": "블루 아카이브 픽업 모집",
+  "entities": [
+    {
+      "id": "star3",
+      "name": "3성",
+      "prob": { "lit": "0.03" },
+      "children": [
+        { "id": "pickup", "name": "픽업", "prob": { "lit": "0.007" } }
+      ]
+    }
+  ],
+  "nestingPolicy": "clampChildren",
+  "stateVars": [],
+  "probRules": [],
+  "transitions": [],
+  "triggers": [
+    {
+      "at": { "trialCount": 200 },
+      "grant": {
+        "leaf": "pickup",
+        "amount": 1,
+        "consumesTrial": false,
+        "appliesTransitions": true
+      }
+    }
+  ],
+  "run": {
+    "maxTrials": 200,
+    "trackJoint": ["pickup", "star3__self"],
+    "numeric": "scaled"
+  }
+}
+

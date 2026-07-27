@@ -1,0 +1,44 @@
+{
+  "$preset": {
+    "game": "Generic",
+    "banner": "90회 하드 천장",
+    "sourceUrl": "",
+    "verifiedDate": "2026-07-27",
+    "confidence": "community-estimate",
+    "notes": "동적 확률 및 전이 검증용"
+  },
+  "irVersion": 1,
+  "name": "90회 하드 천장",
+  "entities": [
+    { "id": "rare", "name": "희귀", "prob": { "lit": "0.01" } }
+  ],
+  "nestingPolicy": "clampChildren",
+  "stateVars": [
+    { "id": "pity", "init": 0, "max": 89, "role": "control" }
+  ],
+  "probRules": [
+    {
+      "target": "rare",
+      "expr": {
+        "if": { "ge": [{ "var": "pity" }, { "lit": "89" }] },
+        "then": { "lit": "1" },
+        "else": { "lit": "0.01" }
+      }
+    }
+  ],
+  "transitions": [
+    { "when": { "leafOf": "rare" }, "set": { "pity": { "lit": "0" } } },
+    {
+      "when": { "not": { "leafOf": "rare" } },
+      "set": { "pity": { "add": [{ "var": "pity" }, { "lit": "1" }] } }
+    }
+  ],
+  "triggers": [],
+  "run": {
+    "maxTrials": 180,
+    "trackJoint": ["rare"],
+    "numeric": "scaled",
+    "condition": { "ge": [{ "var": "nRare" }, { "lit": "1" }] }
+  }
+}
+

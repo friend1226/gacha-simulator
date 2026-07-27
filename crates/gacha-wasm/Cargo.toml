@@ -1,0 +1,15 @@
+[package]
+name = "gacha-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gacha-core = { path = "../gacha-core", default-features = false, features = ["bigint-pure"] }
+serde_json.workspace = true
+wasm-bindgen.workspace = true
+getrandom.workspace = true
+
