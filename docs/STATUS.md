@@ -35,5 +35,32 @@
 - TypeScript strict 타입 검사: 통과
 - Vite 프로덕션 빌드: 통과
 - 모든 Rust 파일 tree-sitter 문법 검사: 통과
-- Rust `cargo test`: 현재 실행 환경에 Rust 툴체인이 없어 미실행
+- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27): 빌드 성공, 테스트 7/7 통과. 경고 1건(`compile.rs:230` `EntityDef.name` 미사용)
 
+## 2026-07-27 감사 (설계문서 vs 코드 정합성)
+
+`docs/DESIGN.md`/`CLAUDE.md`를 저장소에 반영한 직후, 문서의 주장을 실제 코드와 전수 대조했다. 결과는 `docs/DESIGN.md` §13에 반영했다. 요약:
+
+- §13.1(스펙 차이), §13.2(미구현 진단) 표는 여전히 정확함을 확인 — 드리프트 없음
+- 신규 발견(§13.5, 문서에 없던 것): `numeric: "exact"` 선택 시 `dp` 경로가 조용히 `ScaledF64`로 강등되고 결과 라벨도 `"scaled"`로 잘못 표시되는 버그, UI "정확" 옵션이 exact 엔진을 호출하지 않는 버그, `ExactResult`에 `clamp_events` 누락(절대 규칙 7 부분 위반)
+- 코드 수정은 이번 라운드에 하지 않았다 — §13.5가 다음 작업 우선순위
+
+## 2026-07-27 exact 경로 수정
+
+- `run.numeric: "exact"`가 DP CLI/WASM에서도 BigInt exact 엔진으로 실행됨
+- 웹 UI의 정확 모드가 `run_exact_json`을 직접 호출함
+- exact 결과에 `numeric`, `clampEvents`를 포함하고 UI에도 보정 횟수를 표시함
+- exact 디스패치·clamp 보고 코어 테스트와 UI 백엔드 선택 테스트 추가
+- UI 테스트 4개, TypeScript strict 검사, Vite 프로덕션 빌드 통과
+- 후속 Rust 변경은 현재 Codex 환경에 Rust 툴체인이 없어 `cargo test --workspace` 재실행 필요
+
+## 2026-07-27 PR #2 리뷰 (Codex 수정 검증)
+
+PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검증했다.
+
+- `cargo build --workspace`: 성공, 신규 경고 없음 (기존 `EntityDef.name` dead-code 경고 1건만 유지)
+- `cargo test --workspace`: **8/8 통과** (신규 exact 디스패치 테스트 포함) — Codex 환경에서 못 돌렸던 부분 해소
+- `npx tsc --noEmit`, `npm test`(4/4): 통과
+- 수동 스모크 테스트: `numeric: "exact"` 모델을 `dp` 커맨드로 실행 → `"numeric": "exact"` + BigInt 분자(`1,4,6,4,1`)/분모(`16`)로 이항분포와 정확히 일치. exact 강등 버그·UI 미배선 버그·`clamp_events` 누락이 모두 실제로 해결됐음을 확인
+- 코드 수정 없이 문서만 갱신(`docs/DESIGN.md` §13.4에 검증 기록 추가) 후 push
+- 다음 우선순위는 변경 없음: §13.3의 3대 핵심 테스트(MC↔DP 교차검증, exact↔ScaledF64 일치, 지급 전파)

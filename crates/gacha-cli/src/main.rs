@@ -56,7 +56,7 @@ fn main() -> Result<()> {
                     if done == total || done % 100 == 0 { eprintln!("DP {done}/{total}"); }
                     true
                 },
-            );
+            )?;
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
         Command::Exact { model, reduce } => {
@@ -101,4 +101,3 @@ fn load(path: &PathBuf) -> Result<gacha_core::CompiledModel> {
         )
     })
 }
-

@@ -22,7 +22,7 @@ pub fn validate_model(source: &str) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn run_dp_json(source: &str) -> Result<String, JsValue> {
     let model = compile_source(source)?;
-    let result = run_dp(&model, DpOptions::default(), |_, _| true);
+    let result = run_dp(&model, DpOptions::default(), |_, _| true).map_err(js_error)?;
     serde_json::to_string(&result).map_err(js_error)
 }
 
@@ -50,4 +50,3 @@ fn compile_source(source: &str) -> Result<gacha_core::CompiledModel, JsValue> {
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&error.to_string())
 }
-

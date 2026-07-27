@@ -881,31 +881,33 @@ Blockly 워크스페이스 → **Model IR JSON 직렬화**. JS 코드 생성 경
 
 ---
 
-## 13. 구현 현황과 스펙 차이 (v1.1 추가)
+## 13. 구현 현황과 스펙 차이 (v1.1 추가, 2026-07-27 감사로 갱신)
 
 초기 구현이 완료된 시점에 스펙과 실제 코드를 대조한 결과다.
 아래 항목은 **스펙 변경이 아니라 미구현·차이의 기록**이며, 해소되면 이 절에서 지운다.
+
+**2026-07-27 감사 노트**: 아래 §13.1/§13.2 표는 실제 코드(`crates/gacha-core/src/*.rs`)를 재대조해 여전히 정확함을 확인했다 (드리프트 없음). 단, 이 감사에서 **문서에 없던 새 버그 2건**을 발견해 §13.5에 기록했다 — 특히 §13.5-1(exact 모드 조용한 강등)은 다른 무엇보다 먼저 처리해야 하는 정확성 버그다.
 
 ### 13.1 스펙과 다르게 구현된 부분
 
 | 위치 | 스펙 | 현재 구현 | 처리 |
 |---|---|---|---|
-| §6.1 상태 인코딩 | mixed-radix `u64` 패킹 | `struct State { control: Vec<u32>, counts: Vec<u32> }` | M8에서 패킹으로 교체. 전이마다 힙 할당 2회 + Vec 해시가 발생하므로 DP 성능의 주 병목 |
-| §8 스냅샷 | GCHS 포맷 + zstd + 체크포인트 | 미구현 | M8 |
-| §5.2 병렬 | rayon / Web Worker | 단일 스레드 | M8 |
-| §7 조건 (exact) | exact 백엔드도 흡수 상태 지원 | `engine_dp`만 지원, `engine_exact`는 결합분포만 | M7 잔여 |
-| §3.6 `consumesTrial` | true면 지급이 시행을 소모 | 필드만 존재, 전개 미반영 | M5 잔여 |
-| §4.2 lazy 확률표 | 제어상태 10^7 초과 시 lazy 캐시 | 항상 사전계산 | 한계 초과 모델이 나오면 착수 |
+| §6.1 상태 인코딩 | mixed-radix `u64` 패킹 | `struct State { control: Vec<u32>, counts: Vec<u32> }` (`engine_dp.rs:19-22`, `engine_exact.rs:25-28`) | M8에서 패킹으로 교체. 전이마다 힙 할당 2회 + Vec 해시가 발생하므로 DP 성능의 주 병목 |
+| §8 스냅샷 | GCHS 포맷 + zstd + 체크포인트 | 미구현 (`snapshot`/`checkpoint`/`zstd` 관련 파일·심볼 없음) | M8 |
+| §5.2 병렬 | rayon / Web Worker | 단일 스레드. `parallel` feature flag는 선언만 있고 `#[cfg(feature = "parallel")]` 게이트가 코드에 전혀 없는 빈 스텁 | M8 |
+| §7 조건 (exact) | exact 백엔드도 흡수 상태 지원 | `engine_dp`(`condition_matches_sparse`/`hit_pmf`)만 지원, `engine_exact`는 `model.condition`/`hit_pmf` 참조 자체가 없어 결합분포만 산출 | M7 잔여 |
+| §3.6 `consumesTrial` | true면 지급이 시행을 소모 | `ir.rs:119`에 필드 존재, `compile.rs:88,608`에서 `CompiledGrant.consumes_trial`로 배선되지만 `apply_triggers`/`apply_triggers_sparse`나 세 엔진 어디에서도 값을 읽지 않음 | M5 잔여 |
+| §4.2 lazy 확률표 | 제어상태 10^7 초과 시 lazy 캐시 | `compile.rs:280-305`가 항상 즉시 사전계산. 10,000,000 초과 시 `W004` 경고(`compile.rs:282`)만 내고 그대로 계산 강행 | 한계 초과 모델이 나오면 착수 |
 
 ### 13.2 미구현 진단
 
-`compile.rs`에 없는 것: **E002**(음수 확률 정적 검출), **W003**(조건 만족가능성).
-`ui/src/validator.ts`에는 E002가 있으나 코어에는 없어 CLI 경로에서 누락된다.
+`compile.rs`에 없는 것: **E002**(음수 확률 정적 검출), **W003**(조건 만족가능성) — 두 문자열 다 `.rs`/`.ts` 전체에서 코드로 검색해도 나오지 않는다(문서에만 존재).
+`ui/src/validator.ts:54`에는 리터럴 한정 E002 체크가 있으나 코어(`compile.rs`)에는 없어 CLI/WASM 경로에서는 완전히 누락된다. `compile.rs`가 내는 것은 `E003`(음수 확률의 *런타임* 결과, 제어상태별 표 계산 중 `calculate_leaf_probs`가 음수를 만들면 `compile.rs:301` 부근에서 사후 검출)뿐이며, 이는 정적 분석이 아니다.
 W003은 §7.3의 근거대로 리프 전개 후 선형 부등식 검사로 구현한다.
 
 ### 13.3 테스트 격차 (최우선)
 
-현재 테스트 7개. §9의 검증 항목 중 **가장 중요한 것들이 빠져 있다.**
+현재 테스트 8개(§13.4의 exact 디스패치 회귀 테스트 포함). §9의 검증 항목 중 **가장 중요한 것들이 빠져 있다.**
 
 | 우선순위 | 테스트 | 스펙 | 상태 |
 |---|---|---|---|
@@ -919,8 +921,22 @@ W003은 §7.3의 근거대로 리프 전개 후 선형 부등식 검사로 구�
 
 1~3번은 다른 어떤 작업보다 먼저 한다. 이 세 개가 없으면 이후의 모든 변경이 회귀를 감지하지 못한다.
 
-### 13.4 미검증 사항
+### 13.4 검증 이력
 
-**`cargo test`가 아직 한 번도 실행된 적이 없다.** 초기 구현 환경에 Rust 툴체인이 없었다.
-따라서 워크스페이스가 컴파일되는지조차 확인되지 않은 상태다.
-다른 작업에 앞서 `cargo build --workspace && cargo test --workspace`를 통과시킨다.
+**2026-07-27**: `cargo build --workspace && cargo test --workspace`를 이 환경에서 처음 실행해 확인했다. **빌드 성공, 테스트 7/7 통과** (경고 1건: `compile.rs:230`의 `EntityDef.name` 미사용 dead code). v1.1 원문의 "cargo test가 아직 한 번도 실행된 적이 없다"는 서술은 이 시점부로 해소되었다 — `docs/STATUS.md`도 함께 갱신했다.
+
+다만 통과하는 7개 테스트 중 DP 정확성을 실제로 검증하는 것은 `engine_dp.rs`의 이항분포 대조(`binomial_mass_is_conserved`) 1건뿐이고, MC·exact 백엔드를 검증하는 테스트는 여전히 0건이다. 즉 §13.3의 3대 핵심 테스트 부재는 그대로 유효하다.
+
+**2026-07-27 후속 수정 (Codex)**: 감사에서 발견된 exact 경로 버그 3건을 해소했다. `run_dp`는 `numeric: "exact"`를 BigInt exact 엔진으로 위임하고 CLI/WASM 오류를 전달한다. UI는 exact 선택 시 `run_exact_json`을 호출하며, `ExactResult`는 `numeric: "exact"`와 `clampEvents`를 반환한다. UI에도 보정 횟수를 표시하고 코어·UI 회귀 테스트를 추가했으므로, 해결된 §13.5 목록은 이 절의 원칙에 따라 제거했다.
+
+후속 UI 테스트 4개와 TypeScript/Vite 빌드는 통과했다. 이 Codex 환경에는 Rust 툴체인이 없어 새 Rust 회귀 테스트를 포함한 `cargo test --workspace`는 재실행하지 못했다.
+
+**2026-07-27 PR #2 리뷰 검증**: 위 Codex 수정분을 이 환경에서 직접 빌드·실행해 확인했다.
+
+- `cargo build --workspace`: 성공 (경고는 기존의 `compile.rs:230` dead-code 1건뿐, 신규 경고 없음)
+- `cargo test --workspace`: **8/8 통과** — 신규 `engine_dp::tests::exact_numeric_dispatches_to_bigint_engine_and_reports_clamps` 포함, 기존 7개 회귀 없음
+- `cd ui && npx tsc --noEmit`: 통과
+- `cd ui && npm test`: 4/4 통과
+- 수동 CLI 스모크 테스트: `numeric: "exact"`, 공정한 동전 4회 모델을 `dp` 커맨드로 실행 → 출력이 `"numeric": "exact"`와 분자열 `1, 4, 6, 4, 1`(분모 `16`)을 반환해 이항분포 `B(4, 1/2)`와 정확히 일치함을 확인. `run_dp`가 exact를 선택했을 때 실제로 `run_exact`(공통분모 BigInt 경로)로 위임되고 있음이 실행 결과로도 검증됐다
+
+세 버그(exact 강등, UI 미배선, `clamp_events` 누락) 모두 해결을 코드 검토와 실행 양쪽으로 확인했다. §13.5는 삭제된 상태를 유지한다. 다음 우선순위는 여전히 §13.3의 3대 핵심 테스트다.

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Braces, ChevronDown, CircleAlert, CircleCheck, FlaskConical, Play, RotateCcw } from "lucide-react";
 import { Blockly, loadIr, toolbox, workspaceToIr } from "./blockly";
+import { runDpJson, type WasmEngine } from "./engine";
 import { blueArchive } from "./preset";
 import type { ModelIr } from "./types";
 import { validateLocally } from "./validator";
@@ -19,6 +20,7 @@ export function App() {
   const [result, setResult] = useState<{
     engine: string;
     trackedLeafIds: string[];
+    clampEvents: number;
     joint: Array<{ counts: number[]; probability?: number; occurrences?: number; interval?: { estimate: number; lower: number; upper: number } }>;
   } | null>(null);
   const validation = useMemo(() => validateLocally(model), [model]);
@@ -88,20 +90,28 @@ export function App() {
     setRunMessage(engine === "dp" ? "마르코프 DP 실행 준비 중…" : "몬테카를로 실행 준비 중…");
     try {
       const wasmPath = "/wasm/gacha_wasm.js";
-      const wasm = await import(/* @vite-ignore */ wasmPath) as {
-        default?: () => Promise<void>;
-        run_dp_json: (source: string) => string;
-        run_mc_json: (source: string, runs: number, seed: number) => string;
-      };
+      const wasm = await import(/* @vite-ignore */ wasmPath) as WasmEngine;
       await wasm.default?.();
-      const result = engine === "dp"
-        ? wasm.run_dp_json(JSON.stringify(model))
-        : wasm.run_mc_json(JSON.stringify(model), 100_000, 42);
-      const parsed = JSON.parse(result);
-      setResult({ engine: engine.toUpperCase(), trackedLeafIds: parsed.trackedLeafIds ?? [], joint: parsed.joint ?? [] });
-      setRunMessage(`${engine.toUpperCase()} 완료 · ${parsed.joint?.length ?? 0}개 결과 셀 · ${parsed.elapsedMs ?? 0}ms`);
-    } catch {
-      setRunMessage("WASM 패키지가 아직 배치되지 않았습니다. 루트에서 wasm-pack build crates/gacha-wasm --target web --out-dir ../../ui/public/wasm 를 실행하세요.");
+      const execution = engine === "dp"
+        ? runDpJson(wasm, model)
+        : { engine: "MC" as const, json: wasm.run_mc_json(JSON.stringify(model), 100_000, 42) };
+      const parsed = JSON.parse(execution.json);
+      const clampEvents = parsed.clampEvents ?? 0;
+      setResult({
+        engine: execution.engine,
+        trackedLeafIds: parsed.trackedLeafIds ?? [],
+        clampEvents,
+        joint: parsed.joint ?? [],
+      });
+      const clampMessage = clampEvents > 0 ? ` · 확률 보정 ${clampEvents}회` : "";
+      setRunMessage(`${execution.engine} 완료 · ${parsed.joint?.length ?? 0}개 결과 셀 · ${parsed.elapsedMs ?? 0}ms${clampMessage}`);
+    } catch (error) {
+      const message = String(error);
+      if (message.includes("dynamically imported module") || message.includes("Cannot find module")) {
+        setRunMessage("WASM 패키지가 아직 배치되지 않았습니다. 루트에서 wasm-pack build crates/gacha-wasm --target web --out-dir ../../ui/public/wasm 를 실행하세요.");
+      } else {
+        setRunMessage(`실행 오류: ${message}`);
+      }
     }
   }
 
@@ -188,7 +198,13 @@ export function App() {
           </div>
           {result && (
             <div className="result-panel">
-              <div className="result-title"><span>{result.engine} 결과</span><small>상위 {Math.min(30, result.joint.length)}개 셀</small></div>
+              <div className="result-title">
+                <span>{result.engine} 결과</span>
+                <small>
+                  상위 {Math.min(30, result.joint.length)}개 셀
+                  {result.clampEvents > 0 && ` · 확률 보정 ${result.clampEvents}회`}
+                </small>
+              </div>
               <div className="result-head">
                 <span>{result.trackedLeafIds.join(" · ") || "집계"}</span><span>확률</span>
               </div>
