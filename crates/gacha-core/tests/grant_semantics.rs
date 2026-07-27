@@ -146,8 +146,60 @@ fn consuming_grant_records_first_hit_on_its_consumed_trial() {
 #[test]
 fn consuming_grant_is_not_applied_without_remaining_trial_budget() {
     let model = grant_model("scaled", true, true, 3, false);
+    assert!(
+        model
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "W007"),
+        "compiler must report the statically known dropped grant",
+    );
     let dp = run_scaled(&model);
     assert_eq!(dp.trials, 3);
     assert_eq!(dp.joint.len(), 1);
     assert_eq!(dp.joint[0].counts, vec![3, 0, 0]);
+}
+
+#[test]
+fn compiler_warns_for_each_consuming_grant_beyond_the_remaining_budget() {
+    let ir: ModelIr = serde_json::from_value(json!({
+        "irVersion": 1,
+        "name": "multiple consuming grants",
+        "entities": [{"id": "gift", "name": "gift", "prob": {"lit": "1"}}],
+        "stateVars": [],
+        "probRules": [],
+        "transitions": [],
+        "triggers": [
+            {
+                "blockId": "fits",
+                "at": {"trialCount": 1},
+                "grant": {"leaf": "gift", "consumesTrial": true}
+            },
+            {
+                "blockId": "overflow-1",
+                "at": {"trialCount": 1},
+                "grant": {"leaf": "gift", "consumesTrial": true}
+            },
+            {
+                "blockId": "overflow-2",
+                "at": {"trialCount": 1},
+                "grant": {"leaf": "gift", "consumesTrial": true}
+            }
+        ],
+        "run": {
+            "maxTrials": 2,
+            "trackJoint": ["gift"],
+            "numeric": "scaled"
+        }
+    }))
+    .expect("warning regression IR must deserialize");
+    let model = compile(&ir).expect("warning regression IR must compile");
+    let warnings: Vec<_> = model
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "W007")
+        .collect();
+
+    assert_eq!(warnings.len(), 2);
+    assert_eq!(warnings[0].block_id.as_deref(), Some("overflow-1"));
+    assert_eq!(warnings[1].block_id.as_deref(), Some("overflow-2"));
 }

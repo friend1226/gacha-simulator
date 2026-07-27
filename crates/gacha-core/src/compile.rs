@@ -355,6 +355,7 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     let leaf_lookup: HashMap<_, _> = leaves.iter().enumerate().map(|(i, l)| (l.id.as_str(), i)).collect();
     let transitions = compile_transitions(&ir.transitions, &leaves, &control_ids, &mut diagnostics);
     let triggers = compile_triggers(&ir.triggers, &leaves, &leaf_lookup, &control_ids, &mut diagnostics);
+    warn_unapplied_consuming_grants(&ir.triggers, ir.run.max_trials, &mut diagnostics);
     let tracked_leaves = expand_tracked(&ir.run.track_joint, &leaves, &mut diagnostics);
     let mut state_leaf_set: BTreeSet<usize> = tracked_leaves.iter().copied().collect();
     if let Some(condition_expr) = &ir.run.condition {
@@ -629,6 +630,31 @@ fn compile_triggers(
         let assignments = compile_assignments(&trigger.set, control_ids, diagnostics, trigger.block_id.clone());
         Some(CompiledTrigger { trial_count: trigger.at.trial_count, grant, assignments })
     }).collect()
+}
+
+fn warn_unapplied_consuming_grants(
+    triggers: &[Trigger],
+    max_trials: u32,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut consuming_by_trial = BTreeMap::<u32, u32>::new();
+    for trigger in triggers {
+        let Some(grant) = &trigger.grant else { continue; };
+        if !grant.consumes_trial { continue; }
+        let requested = consuming_by_trial.entry(trigger.at.trial_count).or_default();
+        *requested += 1;
+        let available = max_trials.saturating_sub(trigger.at.trial_count);
+        if *requested > available {
+            diagnostics.push(warning(
+                "W007",
+                format!(
+                    "consumesTrial grant at trialCount {} has no remaining logical trial slot within maxTrials {max_trials} and will not be applied",
+                    trigger.at.trial_count,
+                ),
+                trigger.block_id.clone(),
+            ));
+        }
+    }
 }
 
 fn compile_grant(

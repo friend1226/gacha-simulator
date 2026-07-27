@@ -68,7 +68,7 @@ presets/            게임별 Model IR (코드 하드코딩 금지)
 
 ### 1. 빌드·테스트 통과 — 완료 (2026-07-27 확인)
 
-최초 검증에서 `cargo build --workspace && cargo test --workspace` 7/7 통과를 확인했다. exact 경로 수정 후 8/8, §13.3의 전체 검증을 구현한 최신 로컬 실행은 Rust 26/26 통과다. 작업 브랜치의 GitHub Actions에서도 핵심 검증 병합 전 Rust 13/13과 UI 4/4가 통과했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
+최초 검증에서 `cargo build --workspace && cargo test --workspace` 7/7 통과를 확인했다. exact 경로 수정 후 8/8, §13.3의 전체 검증과 `W007` 지급 예산 경고를 구현한 최신 로컬 실행은 Rust 27/27 통과다. 작업 브랜치의 GitHub Actions에서도 핵심 검증 병합 전 Rust 13/13과 UI 4/4가 통과했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
 
 ```bash
 cargo build --workspace && cargo test --workspace
@@ -86,7 +86,7 @@ cargo build --workspace && cargo test --workspace
 
 ### 3. §13.3 검증 테스트 1~7 — 완료 (`docs/DESIGN.md` §13.3)
 
-2026-07-27 다음 검증을 함께 유지하고 `cargo test --workspace` 26/26 통과를 확인했다.
+2026-07-27 다음 검증을 함께 유지하고 `cargo test --workspace` 27/27 통과를 확인했다.
 
 - **MC ↔ DP 교차 검증** — 10개 모델에서 각각 MC 10^6회 및 실제 희귀 비율 모델, Wilson 이탈 셀 5% 미만
 - **exact ↔ ScaledF64 일치** — 복합 모델의 모든 셀과 `0.007^200` 극소 셀에서 상대오차 ≤ 1e-10

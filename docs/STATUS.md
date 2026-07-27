@@ -38,7 +38,7 @@
 - TypeScript strict 타입 검사: 통과
 - Vite 프로덕션 빌드: 통과
 - 모든 Rust 파일 tree-sitter 문법 검사: 통과
-- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27 최신): 빌드 성공, 테스트 26/26 통과. 경고 1건(`compile.rs` `EntityDef.name` 미사용)
+- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27 최신): 빌드 성공, 테스트 27/27 통과. 경고 1건(`compile.rs` `EntityDef.name` 미사용)
 
 ## 2026-07-27 감사 (설계문서 vs 코드 정합성)
 
@@ -92,6 +92,7 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 ## 2026-07-27 §13.3 잔여 검증 완료
 
 - `consumesTrial`을 세 엔진에 배선하고 지급 슬롯·최초 달성·마지막 시행 경계를 회귀 테스트로 고정했다.
+- 남은 시행 예산을 초과해 적용되지 않는 `consumesTrial` 지급은 컴파일 경고 `W007`로 보고한다.
 - 지급 의미론 4조합을 MC·ScaledF64 DP·ExactInt DP에서 비교했다.
 - 기하분포·음이항분포 closed-form 대조, 프리셋 2종 골든, 결정적 IR 퍼징을 추가했다.
-- 로컬 `cargo test --workspace`: **26/26 통과**. 다음 정확성 우선순위는 E002/W003 코어 진단과 exact 최초 달성 흡수 모드다.
+- 로컬 `cargo test --workspace`: **27/27 통과**. 다음 정확성 우선순위는 E002/W003 코어 진단과 exact 최초 달성 흡수 모드다.
