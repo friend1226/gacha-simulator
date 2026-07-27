@@ -950,3 +950,10 @@ W003은 §7.3의 근거대로 리프 전개 후 선형 부등식 검사로 구�
 - 교차검증이 MC alias table의 마지막 버킷 유실 버그와 Wilson 0회 관측 구간의 미세한 양수 하한 버그를 발견했다. 두 버그를 수정하고 각각 직접 회귀 테스트를 추가했다.
 - GitHub Actions CI를 추가해 Rust 워크스페이스와 UI 타입 검사/테스트를 자동 실행한다. 병합 전 작업 브랜치의 [CI run 30251695965](https://github.com/friend1226/gacha-simulator/actions/runs/30251695965)에서 Rust **13/13**, UI **4/4**가 통과했다.
 - 병합 후 로컬 `cargo test --workspace`: **17/17 통과**. §13.3의 4~7번은 아직 남아 있다.
+
+**2026-07-27 §13.3 병합 리뷰 검증**: 위 병합 결과를 이 환경에서 직접 체크아웃해 검증했다.
+
+- `cargo test --workspace`: **17/17 통과** (`gacha-core` 유닛 14개 + `tests/design_13_3.rs` 통합 3개), 신규 경고 없음
+- 병합 컨플릭트 4곳(`CLAUDE.md`, `engine_mc.rs`, `docs/DESIGN.md`, `docs/STATUS.md`)에 잔여 마커 없이 정상 해결됐음을 확인
+- 이전 라운드에서 지적했던 `report.rs`의 Wilson 하한 버그(`successes=0`일 때 `wilson(0, 1_000_000, z)`의 clamp 전 raw 값이 `4.235164736271502e-22`로 정확히 0.0이 아니었던 문제)가 이번 병합으로 들어온 수정과 `wilson_uses_exact_probability_boundaries` 회귀 테스트로 해소됐음을 재확인
+- 코드 결함 없음. 다음 우선순위는 §13.3의 4~7번(지급 의미론 4조합, 기하/음이항 해석해, 프리셋 골든 파일, IR 퍼징)이며, DESIGN.md §13.1의 `consumesTrial` 미배선 항목을 먼저 해소해야 4번 테스트가 의미를 가진다.
