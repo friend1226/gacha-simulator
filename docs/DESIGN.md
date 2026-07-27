@@ -927,12 +927,6 @@ W003은 §7.3의 근거대로 리프 전개 후 선형 부등식 검사로 구�
 
 다만 통과하는 7개 테스트 중 DP 정확성을 실제로 검증하는 것은 `engine_dp.rs`의 이항분포 대조(`binomial_mass_is_conserved`) 1건뿐이고, MC·exact 백엔드를 검증하는 테스트는 여전히 0건이다. 즉 §13.3의 3대 핵심 테스트 부재는 그대로 유효하다.
 
-### 13.5 신규 발견 버그 (2026-07-27 감사, §13.3보다 먼저 처리)
+**2026-07-27 후속 수정 (Codex)**: 감사에서 발견된 exact 경로 버그 3건을 해소했다. `run_dp`는 `numeric: "exact"`를 BigInt exact 엔진으로 위임하고 CLI/WASM 오류를 전달한다. UI는 exact 선택 시 `run_exact_json`을 호출하며, `ExactResult`는 `numeric: "exact"`와 `clampEvents`를 반환한다. UI에도 보정 횟수를 표시하고 코어·UI 회귀 테스트를 추가했으므로, 해결된 §13.5 목록은 이 절의 원칙에 따라 제거했다.
 
-이 감사에서 스펙 문서에 없던 실제 정확성 버그 2건과 절대 규칙 7의 부분 위반 1건을 발견했다. 코드 수정은 이번 라운드에서 하지 않았고, 다음 작업자(Codex 등)가 §13.3 테스트에 착수하기 전에 먼저 고쳐야 한다 — 아래 버그들은 그 3대 테스트가 검증 대상으로 삼아야 할 동작 자체를 침범한다.
-
-1. **`numeric: "exact"`가 조용히 `ScaledF64`로 강등된다.** `engine_dp.rs:60-64`의 `run_dp`가 `match model.numeric { F64 => ..., Scaled | Exact => run_generic::<ScaledF64>(..., "scaled") }` 형태로 되어 있어, IR의 `run.numeric`이 `"exact"`여도 `dp` CLI 커맨드와 `run_dp_json`(WASM)은 근사 백엔드로 실행되고 **출력 메타데이터에도 `"numeric": "scaled"`라고 표시된다.** 에러도 경고도 없다. 진짜 정확 계산은 별도의 `exact` 커맨드/`run_exact_json`에서만 일어나며, 이는 `model.run.numeric`을 아예 참조하지 않고 자신의 시행/상태/메모리 가드레일(§2.3)만 본다. 사용자가 "정확" 모드를 골랐다고 믿고 근사값을 정확값으로 오인할 수 있는 실사용 버그다.
-2. **UI의 "정확" 옵션이 exact 엔진을 아예 호출하지 않는다.** `ui/src/App.tsx:176`은 `<option value="exact">정확</option>`을 제공하지만, `run()`(같은 파일 83-106행)은 항상 `wasm.run_dp_json`만 호출하고 `run_exact_json`은 import조차 되어 있지 않다. 버그 1과 겹쳐 웹 UI에서는 이 문제가 완전히 은폐되어 있다 — "정확"을 선택해도 티 나지 않는 ScaledF64 결과가 나온다.
-3. **`ExactResult`에 `clamp_events`가 없다** (절대 규칙 7 부분 위반). `engine_dp.rs`의 `DpResult`와 `engine_mc.rs`의 `McResult`는 둘 다 `model.prob_table.clamp_events`(nestingPolicy 충돌 해소 횟수, §4.4)를 결과에 실어 보내지만, `engine_exact.rs:39-48`의 `ExactResult`에는 해당 필드 자체가 없다. exact 모드에서 clamp 이벤트가 발생해도 사용자에게 보고되지 않고 조용히 버려진다.
-
-우선순위: 1·2번은 사실상 하나의 버그(exact 경로 미배선)이므로 함께 고친다 — `run_dp`가 `Exact`를 선택했을 때는 `run_exact`로 위임하거나 최소한 에러를 반환해야 하고, UI는 `run_exact_json`을 실제로 호출해야 한다. 3번은 `ExactResult`에 `clamp_events: u64` 필드를 추가하고 `run_exact`가 채우면 된다.
+후속 UI 테스트 4개와 TypeScript/Vite 빌드는 통과했다. 이 Codex 환경에는 Rust 툴체인이 없어 새 Rust 회귀 테스트를 포함한 `cargo test --workspace`는 재실행하지 못했다.
