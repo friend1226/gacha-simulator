@@ -163,5 +163,12 @@ mod tests {
         assert_eq!(skewed.probability, vec![0.4, 1.0]);
         assert_eq!(skewed.alias, vec![1, 1]);
     }
-}
 
+    #[test]
+    fn alias_table_keeps_the_final_large_bucket() {
+        let table = AliasTable::new(&[0.25, 0.25, 0.5]);
+
+        assert_eq!(table.probability[2], 1.0);
+        assert_eq!(table.alias[2], 2);
+    }
+}

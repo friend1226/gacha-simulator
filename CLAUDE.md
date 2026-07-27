@@ -68,7 +68,7 @@ presets/            게임별 Model IR (코드 하드코딩 금지)
 
 ### 1. 빌드·테스트 통과 — 완료 (2026-07-27 확인)
 
-`cargo build --workspace && cargo test --workspace`를 이 환경에서 실행해 빌드 성공을 확인했다. 최초 검증은 7/7, exact 경로 수정 후 8/8, §13.3 최우선 테스트와 MC 수정 후 최신 검증은 12/12 통과다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
+최초 검증에서 `cargo build --workspace && cargo test --workspace` 7/7 통과를 확인했다. exact 경로 수정 후 8/8, 병렬로 구현한 §13.3 검증을 병합한 최신 로컬 실행은 Rust 17/17 통과다. 작업 브랜치의 GitHub Actions에서도 병합 전 Rust 13/13과 UI 4/4가 통과했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
 
 ```bash
 cargo build --workspace && cargo test --workspace
@@ -86,13 +86,13 @@ cargo build --workspace && cargo test --workspace
 
 ### 3. 핵심 검증 테스트 3개 — 완료 (`docs/DESIGN.md` §13.3)
 
-2026-07-27 다음 테스트를 추가하고 `cargo test --workspace` 12/12 통과를 확인했다.
+2026-07-27 병렬 구현을 병합해 다음 검증을 함께 유지하고 `cargo test --workspace` 17/17 통과를 확인했다.
 
-- **MC ↔ DP 교차 검증** — 10개 모델에서 각각 MC 10^6회, Wilson 이탈 셀 5% 미만
-- **exact ↔ ScaledF64 일치** — 모든 셀 상대오차 ≤ 1e-10
+- **MC ↔ DP 교차 검증** — 10개 모델에서 각각 MC 10^6회 및 실제 희귀 비율 모델, Wilson 이탈 셀 5% 미만
+- **exact ↔ ScaledF64 일치** — 복합 모델의 모든 셀과 `0.007^200` 극소 셀에서 상대오차 ≤ 1e-10
 - **지급 전파** — 200회 모델의 전체 `nStar3` 분포가 정확히 +1 이동
 
-교차검증이 MC alias-table의 bucket 원소 소실 버그를 발견했고 수정 및 직접 회귀 테스트까지 완료했다.
+교차검증이 MC alias-table의 bucket 원소 소실 버그와 Wilson 경계 반올림 버그를 발견했고, 두 문제의 수정 및 직접 회귀 테스트를 완료했다.
 
 ### 4. 이후
 

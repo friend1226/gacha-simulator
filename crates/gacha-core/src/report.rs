@@ -21,8 +21,8 @@ pub fn wilson(successes: u64, trials: u64, z: f64) -> WilsonInterval {
     let radius = z * ((p * (1.0 - p) / n + z2 / (4.0 * n * n)).sqrt()) / denominator;
     WilsonInterval {
         estimate: p,
-        lower: (center - radius).max(0.0),
-        upper: (center + radius).min(1.0),
+        lower: if successes == 0 { 0.0 } else { (center - radius).max(0.0) },
+        upper: if successes == trials { 1.0 } else { (center + radius).min(1.0) },
         confidence: 0.95,
     }
 }
@@ -36,5 +36,13 @@ mod tests {
         let ci = wilson(34, 1000, 1.959963984540054);
         assert!(ci.lower < ci.estimate && ci.estimate < ci.upper);
     }
-}
 
+    #[test]
+    fn wilson_uses_exact_probability_boundaries() {
+        let none = wilson(0, 1_000_000, 1.959963984540054);
+        let all = wilson(1_000_000, 1_000_000, 1.959963984540054);
+
+        assert_eq!(none.lower, 0.0);
+        assert_eq!(all.upper, 1.0);
+    }
+}
