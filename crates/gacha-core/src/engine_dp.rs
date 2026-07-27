@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(result.clamp_events, 1);
         assert_eq!(
             result.joint.iter().map(|cell| cell.numerator.as_str()).collect::<Vec<_>>(),
-            ["9", "6", "1"],
+            vec!["9", "6", "1"],
         );
     }
 }
