@@ -45,3 +45,11 @@
 - 신규 발견(§13.5, 문서에 없던 것): `numeric: "exact"` 선택 시 `dp` 경로가 조용히 `ScaledF64`로 강등되고 결과 라벨도 `"scaled"`로 잘못 표시되는 버그, UI "정확" 옵션이 exact 엔진을 호출하지 않는 버그, `ExactResult`에 `clamp_events` 누락(절대 규칙 7 부분 위반)
 - 코드 수정은 이번 라운드에 하지 않았다 — §13.5가 다음 작업 우선순위
 
+## 2026-07-27 exact 경로 수정
+
+- `run.numeric: "exact"`가 DP CLI/WASM에서도 BigInt exact 엔진으로 실행됨
+- 웹 UI의 정확 모드가 `run_exact_json`을 직접 호출함
+- exact 결과에 `numeric`, `clampEvents`를 포함하고 UI에도 보정 횟수를 표시함
+- exact 디스패치·clamp 보고 코어 테스트와 UI 백엔드 선택 테스트 추가
+- UI 테스트 4개, TypeScript strict 검사, Vite 프로덕션 빌드 통과
+- 후속 Rust 변경은 현재 Codex 환경에 Rust 툴체인이 없어 `cargo test --workspace` 재실행 필요
