@@ -68,7 +68,7 @@ presets/            게임별 Model IR (코드 하드코딩 금지)
 
 ### 1. 빌드·테스트 통과 — 완료 (2026-07-27 확인)
 
-최초 검증에서 `cargo build --workspace && cargo test --workspace` 7/7 통과를 확인했다. exact 경로 수정 후 8/8, §13.3의 전체 검증과 `W007` 지급 예산 경고를 구현한 최신 로컬 실행은 Rust 27/27 통과다. 작업 브랜치의 GitHub Actions에서도 핵심 검증 병합 전 Rust 13/13과 UI 4/4가 통과했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
+최초 검증에서 `cargo build --workspace && cargo test --workspace` 7/7 통과를 확인했다. exact 경로 수정 후 8/8, §13.3 전체 검증 후 27/27, E002/W003와 exact 흡수 상태를 구현한 최신 로컬 실행은 Rust 33/33 통과다. 작업 브랜치의 GitHub Actions에서도 핵심 검증 병합 전 Rust 13/13과 UI 4/4가 통과했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
 
 ```bash
 cargo build --workspace && cargo test --workspace
@@ -98,8 +98,8 @@ cargo build --workspace && cargo test --workspace
 
 ### 4. 이후
 
-`docs/DESIGN.md` §13.2의 미구현 코어 진단 E002/W003를 우선 해소하고, §13.1의 exact 최초 달성 흡수 상태와 lazy 확률표를 이어서 검토한다.
-스냅샷·병렬화·`u64` 상태 패킹은 M8이므로 위 정확성 작업보다 먼저 손대지 않는다.
+E002/W003와 exact 최초 달성 흡수 상태는 완료했다. §13.1에서 남은 lazy 확률표는 제어상태 1천만 초과 모델이 실제로 필요할 때 착수한다.
+스냅샷·병렬화·`u64` 상태 패킹은 M8이므로 별도 우선순위 결정 전에는 손대지 않는다.
 
 ---
 

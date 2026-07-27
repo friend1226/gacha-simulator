@@ -6,7 +6,7 @@
 - 정확 십진/분수/지수 리터럴 파서 (`0.007` → `7/1000`)
 - `Prob` 계층과 `F64`, 비트 정규화 기반 `ScaledF64`
 - 공통분모 BigInt exact DP (내부 루프 GCD 없음, 선택적 레이어 약분)
-- Model IR v1 역직렬화, E001/E003/E004/E006/E007/E008 중심 구조화 진단
+- Model IR v1 역직렬화, E002 음수 확률 범위 분석과 W003 조건 만족가능성을 포함한 구조화 진단
 - 표현식 AST → 스택 바이트코드 및 유리수 평가
 - 엔티티 트리 → 배타적 리프 분할과 `__other__` 생성
 - 제어상태·시행별 정확 유리수 확률표 사전계산
@@ -17,6 +17,7 @@
 - 두 프리셋 SHA-256 골든과 결정적 IR 컴파일러/엔진 퍼징
 - GitHub Actions 기반 Rust/UI CI
 - 희소 DP, 추적 리프 축소, 프루닝 손실 보고, 최초 달성 PMF/CDF
+- ExactInt DP 최초 달성 흡수 상태와 공통분모 BigInt PMF/CDF
 - 정확 모드 시행/상태/메모리/분모 가드레일과 진행/취소 콜백
 - CLI 검증/DP/exact/MC 명령과 WASM JSON API
 - 블루 아카이브 및 하드 천장 프리셋
@@ -24,11 +25,10 @@
 
 ## 후속 마일스톤
 
-- Exact DP의 최초 달성 흡수 모드
 - 확률표 1천만 제어상태 초과 시 lazy cache
 - snapshot의 GCHS/zstd/checkpoint 직렬화
 - Rayon/Web Worker 병렬 MC와 자동 CI 폭 정지
-- 전체 E002/E005/W003 정적 구간·만족가능성 분석
+- E005 순환 참조 정적 분석 보강
 - Tauri 데스크톱 패키징
 - 10개 이상 게임 프리셋 및 골든 파일
 
@@ -38,7 +38,7 @@
 - TypeScript strict 타입 검사: 통과
 - Vite 프로덕션 빌드: 통과
 - 모든 Rust 파일 tree-sitter 문법 검사: 통과
-- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27 최신): 빌드 성공, 테스트 27/27 통과. 경고 1건(`compile.rs` `EntityDef.name` 미사용)
+- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27 최신): 빌드 성공, 테스트 33/33 통과. 경고 1건(`compile.rs` `EntityDef.name` 미사용)
 
 ## 2026-07-27 감사 (설계문서 vs 코드 정합성)
 
@@ -96,3 +96,10 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - 지급 의미론 4조합을 MC·ScaledF64 DP·ExactInt DP에서 비교했다.
 - 기하분포·음이항분포 closed-form 대조, 프리셋 2종 골든, 결정적 IR 퍼징을 추가했다.
 - 로컬 `cargo test --workspace`: **27/27 통과**. 다음 정확성 우선순위는 E002/W003 코어 진단과 exact 최초 달성 흡수 모드다.
+
+## 2026-07-27 코어 진단 및 exact 흡수 상태 완료
+
+- E002를 코어 affine 범위 분석과 제한된 exact 상태 전수 평가로 구현해 CLI/WASM 경로에서도 음수 확률을 블록 ID와 함께 거부한다.
+- W003은 엔티티 카운트를 배타적 리프로 전개해 포함관계·시행 상한·영확률 도달 불가를 정적으로 경고하며, 지급으로 가능한 조건은 경고하지 않는다.
+- ExactInt DP가 최초 달성 질량을 흡수하고 exact PMF/CDF·미달성 질량을 반환한다. 지급이 소모한 논리 시행 번호와 레이어 약분도 검증했다.
+- 로컬 `cargo test --workspace`: **33/33 통과**. Lazy 확률표 캐시는 실제 한계 초과 모델이 필요할 때 착수하며 M8 항목은 계속 보류한다.

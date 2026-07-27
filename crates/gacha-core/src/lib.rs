@@ -10,6 +10,8 @@ pub mod report;
 
 pub use compile::{compile, CompiledModel, Diagnostic, Severity};
 pub use engine_dp::{run_dp, DpOptions, DpResult, DpRunResult};
-pub use engine_exact::{run_exact, ExactOptions, ExactResult};
+pub use engine_exact::{
+    run_exact, ExactFirstHitResult, ExactOptions, ExactProbability, ExactResult,
+};
 pub use engine_mc::{run_mc, McOptions, McResult};
 pub use ir::ModelIr;

@@ -38,11 +38,30 @@ pub struct ExactCell {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ExactProbability {
+    pub numerator: String,
+    pub denominator: String,
+    pub probability: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExactFirstHitResult {
+    pub pmf: Vec<ExactProbability>,
+    pub cdf: Vec<ExactProbability>,
+    pub failure_reachable: ExactProbability,
+    pub mean: Option<f64>,
+    pub percentiles: Vec<(f64, u32)>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExactResult {
     pub numeric: String,
     pub trials: u32,
     pub tracked_leaf_ids: Vec<String>,
     pub joint: Vec<ExactCell>,
+    pub first_hit: Option<ExactFirstHitResult>,
     pub denominator: String,
     pub elapsed_ms: u64,
     pub peak_states: usize,
@@ -83,38 +102,68 @@ pub fn run_exact(
     let mut cells = HashMap::from([(initial, BigInt::one())]);
     let mut denominator = BigInt::one();
     let mut peak_states = 1usize;
+    let mut hit_pmf = model.condition.as_ref()
+        .map(|_| vec![BigInt::zero(); model.max_trials as usize + 1]);
     let mut trial = 0u32;
     while trial < model.max_trials {
         let draw_trial = trial + 1;
         let consumed_trials = model.consumed_trials_after(draw_trial);
         let next_trial = draw_trial + consumed_trials;
+        if let Some(pmf) = &mut hit_pmf {
+            for numerator in pmf { *numerator *= lcm; }
+        }
         let mut next: HashMap<State, BigInt> = HashMap::new();
         for (state, numerator) in cells {
             let ci = model.control_index(&state.control);
             let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
             for (leaf, weight) in weights[ci][ti].iter().enumerate() {
                 if weight.is_zero() { continue; }
+                let contribution = &numerator * weight;
                 let mut successor = state.clone();
                 if let Some(position) = model.state_leaves.iter().position(|tracked| *tracked == leaf) {
                     successor.counts[position] += 1;
                 }
                 model.apply_transitions(&mut successor.control, leaf, draw_trial);
+                if model.condition_matches_sparse(&successor.counts, draw_trial) {
+                    if let Some(pmf) = &mut hit_pmf {
+                        pmf[draw_trial as usize] += contribution;
+                    }
+                    continue;
+                }
+                let mut grant_hit = None;
                 let applied_consumed = model.apply_triggers_sparse(
                     &mut successor.control,
                     &mut successor.counts,
                     draw_trial,
-                    |_, _| {},
+                    |grant_counts, grant_trial| {
+                        if grant_hit.is_none()
+                            && model.condition_matches_sparse(grant_counts, grant_trial)
+                        {
+                            grant_hit = Some(grant_trial);
+                        }
+                    },
                 );
                 debug_assert_eq!(applied_consumed, consumed_trials);
-                *next.entry(successor).or_default() += &numerator * weight;
+                if let Some(hit_trial) = grant_hit {
+                    if let Some(pmf) = &mut hit_pmf {
+                        pmf[hit_trial as usize] += contribution;
+                    }
+                    continue;
+                }
+                *next.entry(successor).or_default() += contribution;
             }
         }
         denominator *= lcm;
         if options.reduce_layers {
-            let gcd = next.values().fold(denominator.clone(), |g, n| g.gcd(n));
+            let gcd = next.values()
+                .chain(hit_pmf.iter().flat_map(|pmf| pmf.iter()))
+                .fold(denominator.clone(), |g, n| g.gcd(n));
             if gcd > BigInt::one() {
                 denominator /= &gcd;
                 for value in next.values_mut() { *value /= &gcd; }
+                if let Some(pmf) = &mut hit_pmf {
+                    for value in pmf { *value /= &gcd; }
+                }
             }
         }
         if next.len() > options.max_states {
@@ -125,7 +174,10 @@ pub fn run_exact(
             return Err(ExactError::MemoryLimit { actual: estimated, limit: options.max_memory_bytes });
         }
         peak_states = peak_states.max(next.len());
-        let sum: BigInt = next.values().sum();
+        let mut sum: BigInt = next.values().sum();
+        if let Some(pmf) = &hit_pmf {
+            sum += pmf.iter().sum::<BigInt>();
+        }
         assert_eq!(sum, denominator, "exact DP mass conservation failure");
         cells = next;
         trial = next_trial;
@@ -147,14 +199,71 @@ pub fn run_exact(
         denominator: denominator_string.clone(),
     }).collect();
     joint.sort_by(|a, b| a.counts.cmp(&b.counts));
+    let first_hit = hit_pmf.map(|pmf| summarize_exact_first_hit(&pmf, &denominator));
     Ok(ExactResult {
         numeric: "exact".into(),
         trials: trial,
         tracked_leaf_ids: model.tracked_leaves.iter().map(|i| model.leaves[*i].id.clone()).collect(),
         joint,
+        first_hit,
         denominator: denominator_string,
         elapsed_ms: started.elapsed().as_millis() as u64,
         peak_states,
         clamp_events: model.prob_table.clamp_events,
     })
+}
+
+fn exact_probability(numerator: BigInt, denominator: &BigInt) -> ExactProbability {
+    ExactProbability {
+        probability: BigRational::new(numerator.clone(), denominator.clone())
+            .to_f64()
+            .unwrap_or(0.0),
+        numerator: numerator.to_string(),
+        denominator: denominator.to_string(),
+    }
+}
+
+fn summarize_exact_first_hit(
+    pmf: &[BigInt],
+    denominator: &BigInt,
+) -> ExactFirstHitResult {
+    let mut running = BigInt::zero();
+    let mut cumulative = Vec::with_capacity(pmf.len());
+    for numerator in pmf {
+        running += numerator;
+        cumulative.push(running.clone());
+    }
+    let success = running;
+    let failure = denominator - &success;
+    let weighted: BigInt = pmf.iter().enumerate()
+        .map(|(trial, numerator)| numerator * BigInt::from(trial))
+        .sum();
+    let mean = (!success.is_zero()).then(|| {
+        BigRational::new(weighted, success.clone()).to_f64().unwrap_or(0.0)
+    });
+    let levels = [
+        (0.5, BigInt::from(1), BigInt::from(2)),
+        (0.75, BigInt::from(3), BigInt::from(4)),
+        (0.9, BigInt::from(9), BigInt::from(10)),
+        (0.95, BigInt::from(19), BigInt::from(20)),
+        (0.99, BigInt::from(99), BigInt::from(100)),
+    ];
+    let percentiles = levels.into_iter().map(|(level, numerator, level_denominator)| {
+        let target = &success * numerator;
+        let trial = cumulative.iter()
+            .position(|value| value * &level_denominator >= target)
+            .unwrap_or(cumulative.len().saturating_sub(1));
+        (level, trial as u32)
+    }).collect();
+    ExactFirstHitResult {
+        pmf: pmf.iter().cloned()
+            .map(|numerator| exact_probability(numerator, denominator))
+            .collect(),
+        cdf: cumulative.into_iter()
+            .map(|numerator| exact_probability(numerator, denominator))
+            .collect(),
+        failure_reachable: exact_probability(failure, denominator),
+        mean,
+        percentiles,
+    }
 }

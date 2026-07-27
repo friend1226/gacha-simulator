@@ -2,7 +2,7 @@ use crate::expr::{compile_expr, eval, Program};
 use crate::ir::{
     Entity, Grant, LeafPredicate, ModelIr, NestingPolicy, NumericBackend, StateRole, Transition, Trigger,
 };
-use crate::rational::Rational;
+use crate::rational::{parse_literal, Rational};
 use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
@@ -224,6 +224,16 @@ impl CompiledModel {
         found.then_some(total)
     }
 
+    pub fn condition_matches_sparse(&self, counts: &[u32], trial: u32) -> bool {
+        let Some(program) = &self.condition else { return false; };
+        eval(program, |name| {
+            let entity = name.strip_prefix('n').map(lower_first)
+                .unwrap_or_else(|| name.to_owned());
+            self.entity_count_sparse(counts, &entity)
+                .map(|value| Rational::from_integer(value.into()))
+        }, trial).and_then(|value| value.boolean()).unwrap_or(false)
+    }
+
     pub fn apply_triggers_sparse(
         &self,
         control: &mut [u32],
@@ -317,6 +327,14 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
             diagnostics.push(error("E005", format!("probability rule targets unknown entity '{}'", rule.target), rule.block_id.clone()));
         }
     }
+    validate_probability_ranges(
+        &ir.entities,
+        &ir.prob_rules,
+        &control_ids,
+        &control_max,
+        ir.run.max_trials,
+        &mut diagnostics,
+    );
 
     let control_states = control_max.iter().fold(1u64, |n, max| n.saturating_mul(*max as u64 + 1));
     if control_states > 10_000_000 {
@@ -375,6 +393,21 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         Ok(p) => Some(p),
         Err(e) => { diagnostics.push(error("E006", e.to_string(), None)); None }
     });
+    if condition.is_some() {
+        if let Some(false) = condition_could_be_true(
+            ir.run.condition.as_ref().expect("compiled condition source"),
+            ir.run.max_trials,
+            &leaves,
+            &entries,
+            &triggers,
+        ) {
+            diagnostics.push(warning(
+                "W003",
+                "run condition is statically unsatisfiable within maxTrials",
+                None,
+            ));
+        }
+    }
     if diagnostics.iter().any(|d| d.severity == Severity::Error) {
         return Err(CompileError { diagnostics });
     }
@@ -428,6 +461,391 @@ fn validate_entity_ids(entities: &[Entity], ids: &mut BTreeSet<String>, diagnost
         }
         validate_entity_ids(&entity.children, ids, diagnostics);
     }
+}
+
+#[derive(Clone)]
+struct AffineExpr {
+    constant: Rational,
+    variables: BTreeMap<String, Rational>,
+    trial: Rational,
+}
+
+impl AffineExpr {
+    fn constant(value: Rational) -> Self {
+        Self { constant: value, variables: BTreeMap::new(), trial: Rational::zero() }
+    }
+
+    fn variable(name: String) -> Self {
+        Self {
+            constant: Rational::zero(),
+            variables: BTreeMap::from([(name, Rational::one())]),
+            trial: Rational::zero(),
+        }
+    }
+
+    fn trial() -> Self {
+        Self {
+            constant: Rational::zero(),
+            variables: BTreeMap::new(),
+            trial: Rational::one(),
+        }
+    }
+
+    fn add(mut self, other: Self) -> Self {
+        self.constant += other.constant;
+        self.trial += other.trial;
+        for (name, coefficient) in other.variables {
+            let value = self.variables.entry(name.clone()).or_insert_with(Rational::zero);
+            *value += coefficient;
+            if value.is_zero() { self.variables.remove(&name); }
+        }
+        self
+    }
+
+    fn scale(mut self, factor: &Rational) -> Self {
+        self.constant *= factor;
+        self.trial *= factor;
+        for coefficient in self.variables.values_mut() { *coefficient *= factor; }
+        self
+    }
+
+    fn is_constant(&self) -> bool {
+        self.variables.is_empty() && self.trial.is_zero()
+    }
+}
+
+fn affine_expr(expr: &serde_json::Value) -> Option<AffineExpr> {
+    let object = expr.as_object()?;
+    if let Some(literal) = object.get("lit").and_then(serde_json::Value::as_str) {
+        return parse_literal(literal).ok().map(AffineExpr::constant);
+    }
+    if let Some(variable) = object.get("var").and_then(serde_json::Value::as_str) {
+        return Some(AffineExpr::variable(variable.to_owned()));
+    }
+    if object.get("trial").is_some() {
+        return Some(AffineExpr::trial());
+    }
+    let unary = |name: &str| object.get(name).and_then(affine_expr);
+    let binary = |name: &str| {
+        let arguments = object.get(name)?.as_array()?;
+        (arguments.len() == 2).then(|| (&arguments[0], &arguments[1]))
+    };
+    if let Some(value) = unary("neg") {
+        return Some(value.scale(&-Rational::one()));
+    }
+    if let Some((left, right)) = binary("add") {
+        return Some(affine_expr(left)?.add(affine_expr(right)?));
+    }
+    if let Some((left, right)) = binary("sub") {
+        return Some(affine_expr(left)?.add(affine_expr(right)?.scale(&-Rational::one())));
+    }
+    if let Some((left, right)) = binary("mul") {
+        let left = affine_expr(left)?;
+        let right = affine_expr(right)?;
+        if left.is_constant() {
+            let factor = left.constant;
+            return Some(right.scale(&factor));
+        }
+        if right.is_constant() {
+            let factor = right.constant;
+            return Some(left.scale(&factor));
+        }
+        return None;
+    }
+    if let Some((left, right)) = binary("div") {
+        let numerator = affine_expr(left)?;
+        let denominator = affine_expr(right)?;
+        if !denominator.is_constant() || denominator.constant.is_zero() { return None; }
+        return Some(numerator.scale(&(Rational::one() / denominator.constant)));
+    }
+    None
+}
+
+fn affine_range(
+    expression: &AffineExpr,
+    variable_bounds: &HashMap<&str, u32>,
+    max_trials: u32,
+) -> Option<(Rational, Rational)> {
+    let mut lower = expression.constant.clone();
+    let mut upper = expression.constant.clone();
+    for (name, coefficient) in &expression.variables {
+        let maximum = Rational::from_integer((*variable_bounds.get(name.as_str())?).into());
+        if coefficient.is_negative() {
+            lower += coefficient * &maximum;
+        } else {
+            upper += coefficient * &maximum;
+        }
+    }
+    let first_trial = Rational::one();
+    let last_trial = Rational::from_integer(max_trials.max(1).into());
+    if expression.trial.is_negative() {
+        lower += &expression.trial * last_trial;
+        upper += &expression.trial * first_trial;
+    } else {
+        lower += &expression.trial * first_trial;
+        upper += &expression.trial * last_trial;
+    }
+    Some((lower, upper))
+}
+
+fn validate_probability_ranges(
+    entities: &[Entity],
+    rules: &[crate::ir::ProbRule],
+    control_ids: &[String],
+    control_max: &[u32],
+    max_trials: u32,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let variable_bounds: HashMap<_, _> = control_ids.iter()
+        .zip(control_max)
+        .map(|(name, maximum)| (name.as_str(), *maximum))
+        .collect();
+    for entity in entities {
+        let rule = rules.iter().rev().find(|rule| rule.target == entity.id);
+        let expression = rule.map(|rule| &rule.expr).unwrap_or(&entity.prob);
+        let block_id = rule.and_then(|rule| rule.block_id.clone()).or_else(|| entity.block_id.clone());
+        let negative = if let Some(affine) = affine_expr(expression) {
+            affine_range(&affine, &variable_bounds, max_trials)
+                .map(|(lower, _)| lower)
+                .filter(|minimum| minimum.is_negative())
+        } else {
+            exact_negative_probability(
+                expression,
+                control_ids,
+                control_max,
+                max_trials,
+            )
+        };
+        if let Some(minimum) = negative {
+            diagnostics.push(error(
+                "E002",
+                format!("probability expression for '{}' can be negative (observed {minimum})", entity.id),
+                block_id,
+            ));
+        }
+        validate_probability_ranges(
+            &entity.children,
+            rules,
+            control_ids,
+            control_max,
+            max_trials,
+            diagnostics,
+        );
+    }
+}
+
+fn exact_negative_probability(
+    expression: &serde_json::Value,
+    control_ids: &[String],
+    control_max: &[u32],
+    max_trials: u32,
+) -> Option<Rational> {
+    let program = compile_expr(expression).ok()?;
+    let control_states = control_max.iter()
+        .fold(1u64, |states, maximum| states.saturating_mul(*maximum as u64 + 1));
+    let trials = if program.trial_dependent { max_trials.max(1) } else { 1 };
+    if control_states.saturating_mul(trials as u64) > 1_000_000 { return None; }
+    let mut minimum: Option<Rational> = None;
+    for control_index in 0..control_states {
+        let control = decode_control(control_index, control_max);
+        for trial in 1..=trials {
+            let Ok(value) = eval(&program, |name| {
+                control_ids.iter().position(|id| id == name)
+                    .map(|index| Rational::from_integer(control[index].into()))
+            }, trial).and_then(|value| value.number()) else {
+                continue;
+            };
+            if value.is_negative() && minimum.as_ref().is_none_or(|current| value < *current) {
+                minimum = Some(value);
+            }
+        }
+    }
+    minimum
+}
+
+#[derive(Clone, Copy)]
+struct TruthPossibility {
+    can_be_true: bool,
+    can_be_false: bool,
+}
+
+impl TruthPossibility {
+    fn unknown() -> Self { Self { can_be_true: true, can_be_false: true } }
+}
+
+fn condition_could_be_true(
+    condition: &serde_json::Value,
+    max_trials: u32,
+    leaves: &[Leaf],
+    probability_entries: &[Vec<LeafProbs>],
+    triggers: &[CompiledTrigger],
+) -> Option<bool> {
+    if max_trials == 0 { return Some(false); }
+    condition_possibility(
+        condition,
+        max_trials,
+        leaves,
+        probability_entries,
+        triggers,
+    )
+    .map(|possibility| possibility.can_be_true)
+}
+
+fn condition_possibility(
+    condition: &serde_json::Value,
+    max_trials: u32,
+    leaves: &[Leaf],
+    probability_entries: &[Vec<LeafProbs>],
+    triggers: &[CompiledTrigger],
+) -> Option<TruthPossibility> {
+    let object = condition.as_object()?;
+    for relation in ["eq", "ne", "lt", "le", "gt", "ge"] {
+        let Some(arguments) = object.get(relation).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        if arguments.len() != 2 { return None; }
+        let difference = affine_expr(&arguments[0])?
+            .add(affine_expr(&arguments[1])?.scale(&-Rational::one()));
+        let (lower, upper) = condition_affine_range(
+            &difference,
+            max_trials,
+            leaves,
+            probability_entries,
+            triggers,
+        )?;
+        let zero = Rational::zero();
+        return Some(match relation {
+            "eq" => TruthPossibility {
+                can_be_true: lower <= zero && zero <= upper,
+                can_be_false: lower != zero || upper != zero,
+            },
+            "ne" => TruthPossibility {
+                can_be_true: lower != zero || upper != zero,
+                can_be_false: lower <= zero && zero <= upper,
+            },
+            "lt" => TruthPossibility {
+                can_be_true: lower < zero,
+                can_be_false: upper >= zero,
+            },
+            "le" => TruthPossibility {
+                can_be_true: lower <= zero,
+                can_be_false: upper > zero,
+            },
+            "gt" => TruthPossibility {
+                can_be_true: upper > zero,
+                can_be_false: lower <= zero,
+            },
+            "ge" => TruthPossibility {
+                can_be_true: upper >= zero,
+                can_be_false: lower < zero,
+            },
+            _ => unreachable!(),
+        });
+    }
+    if let Some(inner) = object.get("not") {
+        let inner = condition_possibility(inner, max_trials, leaves, probability_entries, triggers)?;
+        return Some(TruthPossibility {
+            can_be_true: inner.can_be_false,
+            can_be_false: inner.can_be_true,
+        });
+    }
+    for operation in ["and", "or", "xor"] {
+        let Some(arguments) = object.get(operation).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        if arguments.len() != 2 { return None; }
+        let left = condition_possibility(
+            &arguments[0], max_trials, leaves, probability_entries, triggers,
+        )?;
+        let right = condition_possibility(
+            &arguments[1], max_trials, leaves, probability_entries, triggers,
+        )?;
+        return Some(match operation {
+            "and" => TruthPossibility {
+                can_be_true: left.can_be_true && right.can_be_true,
+                can_be_false: left.can_be_false || right.can_be_false,
+            },
+            "or" => TruthPossibility {
+                can_be_true: left.can_be_true || right.can_be_true,
+                can_be_false: left.can_be_false && right.can_be_false,
+            },
+            "xor" => TruthPossibility {
+                can_be_true: (left.can_be_true && right.can_be_false)
+                    || (left.can_be_false && right.can_be_true),
+                can_be_false: (left.can_be_true && right.can_be_true)
+                    || (left.can_be_false && right.can_be_false),
+            },
+            _ => unreachable!(),
+        });
+    }
+    Some(TruthPossibility::unknown())
+}
+
+fn condition_affine_range(
+    expression: &AffineExpr,
+    max_trials: u32,
+    leaves: &[Leaf],
+    probability_entries: &[Vec<LeafProbs>],
+    triggers: &[CompiledTrigger],
+) -> Option<(Rational, Rational)> {
+    let mut leaf_coefficients = vec![Rational::zero(); leaves.len()];
+    for (variable, coefficient) in &expression.variables {
+        let entity = variable.strip_prefix('n').map(lower_first)
+            .unwrap_or_else(|| variable.to_owned());
+        let mut found = false;
+        for (index, leaf) in leaves.iter().enumerate() {
+            if leaf.id == entity || leaf.ancestors.iter().any(|ancestor| ancestor == &entity) {
+                leaf_coefficients[index] += coefficient;
+                found = true;
+            }
+        }
+        if !found { return None; }
+    }
+
+    let possible_normal_leaf: Vec<_> = (0..leaves.len()).map(|leaf| {
+        probability_entries.iter().flat_map(|by_trial| by_trial)
+            .any(|probabilities| probabilities.exact[leaf].is_positive())
+    }).collect();
+    let mut lower = expression.constant.clone();
+    let mut upper = expression.constant.clone();
+    let normal_minimum = leaf_coefficients.iter().zip(&possible_normal_leaf)
+        .filter(|(_, possible)| **possible)
+        .map(|(coefficient, _)| coefficient)
+        .filter(|coefficient| coefficient.is_negative())
+        .min()
+        .cloned()
+        .unwrap_or_else(Rational::zero);
+    let normal_maximum = leaf_coefficients.iter().zip(&possible_normal_leaf)
+        .filter(|(_, possible)| **possible)
+        .map(|(coefficient, _)| coefficient)
+        .filter(|coefficient| coefficient.is_positive())
+        .max()
+        .cloned()
+        .unwrap_or_else(Rational::zero);
+    let trial_budget = Rational::from_integer(max_trials.into());
+    lower += normal_minimum * &trial_budget;
+    upper += normal_maximum * &trial_budget;
+
+    for grant in triggers.iter().filter_map(|trigger| trigger.grant.as_ref()) {
+        let contribution = &leaf_coefficients[grant.leaf]
+            * Rational::from_integer(grant.amount.into());
+        if contribution.is_negative() {
+            lower += contribution;
+        } else {
+            upper += contribution;
+        }
+    }
+
+    let first_trial = Rational::one();
+    let last_trial = Rational::from_integer(max_trials.into());
+    if expression.trial.is_negative() {
+        lower += &expression.trial * last_trial;
+        upper += &expression.trial * first_trial;
+    } else {
+        lower += &expression.trial * first_trial;
+        upper += &expression.trial * last_trial;
+    }
+    Some((lower, upper))
 }
 
 fn collect_leaves(entities: &[Entity], ancestors: &mut Vec<String>, leaves: &mut Vec<Leaf>) {

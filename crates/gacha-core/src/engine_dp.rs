@@ -120,7 +120,7 @@ fn run_generic<P: Prob>(
                     successor.counts[position] += 1;
                 }
                 model.apply_transitions(&mut successor.control, leaf, draw_trial);
-                if condition_matches_sparse(model, &successor.counts, draw_trial) {
+                if model.condition_matches_sparse(&successor.counts, draw_trial) {
                     if let Some(pmf) = &mut hit_pmf { pmf[draw_trial as usize].add_assign(&contribution); }
                     continue;
                 }
@@ -130,7 +130,7 @@ fn run_generic<P: Prob>(
                     &mut successor.counts,
                     draw_trial,
                     |grant_counts, grant_trial| {
-                        if grant_hit.is_none() && condition_matches_sparse(model, grant_counts, grant_trial) {
+                        if grant_hit.is_none() && model.condition_matches_sparse(grant_counts, grant_trial) {
                             grant_hit = Some(grant_trial);
                         }
                     },
@@ -180,20 +180,6 @@ fn run_generic<P: Prob>(
         elapsed_ms: started.elapsed().as_millis() as u64,
         clamp_events: model.prob_table.clamp_events,
     }
-}
-
-fn condition_matches_sparse(model: &CompiledModel, counts: &[u32], trial: u32) -> bool {
-    let Some(program) = &model.condition else { return false; };
-    crate::expr::eval(program, |name| {
-        let entity = name.strip_prefix('n').map(lower_first).unwrap_or_else(|| name.to_owned());
-        model.entity_count_sparse(counts, &entity)
-            .map(|value| crate::rational::Rational::from_integer(value.into()))
-    }, trial).and_then(|value| value.boolean()).unwrap_or(false)
-}
-
-fn lower_first(value: &str) -> String {
-    let mut chars = value.chars();
-    chars.next().map(|c| c.to_lowercase().collect::<String>() + chars.as_str()).unwrap_or_default()
 }
 
 fn summarize_first_hit<P: Prob>(pmf: &[P]) -> FirstHitResult {
