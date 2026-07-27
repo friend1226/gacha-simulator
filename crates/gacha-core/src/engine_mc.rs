@@ -58,7 +58,9 @@ impl AliasTable {
         for (i, &p) in scaled.iter().enumerate() {
             if p < 1.0 { small.push(i); } else { large.push(i); }
         }
-        while let (Some(s), Some(l)) = (small.pop(), large.pop()) {
+        while !small.is_empty() && !large.is_empty() {
+            let s = small.pop().expect("small table is non-empty");
+            let l = large.pop().expect("large table is non-empty");
             probability[s] = scaled[s];
             alias[s] = l;
             scaled[l] = scaled[l] + scaled[s] - 1.0;
@@ -147,3 +149,15 @@ fn lower_first(value: &str) -> String {
     chars.next().map(|c| c.to_lowercase().collect::<String>() + chars.as_str()).unwrap_or_default()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::AliasTable;
+
+    #[test]
+    fn alias_table_keeps_the_final_large_bucket() {
+        let table = AliasTable::new(&[0.25, 0.25, 0.5]);
+
+        assert_eq!(table.probability[2], 1.0);
+        assert_eq!(table.alias[2], 2);
+    }
+}
