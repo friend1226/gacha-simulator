@@ -83,19 +83,29 @@ pub fn run_exact(
     let mut cells = HashMap::from([(initial, BigInt::one())]);
     let mut denominator = BigInt::one();
     let mut peak_states = 1usize;
-    for trial in 1..=model.max_trials {
+    let mut trial = 0u32;
+    while trial < model.max_trials {
+        let draw_trial = trial + 1;
+        let consumed_trials = model.consumed_trials_after(draw_trial);
+        let next_trial = draw_trial + consumed_trials;
         let mut next: HashMap<State, BigInt> = HashMap::new();
         for (state, numerator) in cells {
             let ci = model.control_index(&state.control);
-            let ti = if model.prob_table.trial_dependent { trial as usize - 1 } else { 0 };
+            let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
             for (leaf, weight) in weights[ci][ti].iter().enumerate() {
                 if weight.is_zero() { continue; }
                 let mut successor = state.clone();
                 if let Some(position) = model.state_leaves.iter().position(|tracked| *tracked == leaf) {
                     successor.counts[position] += 1;
                 }
-                model.apply_transitions(&mut successor.control, leaf, trial);
-                model.apply_triggers_sparse(&mut successor.control, &mut successor.counts, trial);
+                model.apply_transitions(&mut successor.control, leaf, draw_trial);
+                let applied_consumed = model.apply_triggers_sparse(
+                    &mut successor.control,
+                    &mut successor.counts,
+                    draw_trial,
+                    |_, _| {},
+                );
+                debug_assert_eq!(applied_consumed, consumed_trials);
                 *next.entry(successor).or_default() += &numerator * weight;
             }
         }
@@ -118,6 +128,7 @@ pub fn run_exact(
         let sum: BigInt = next.values().sum();
         assert_eq!(sum, denominator, "exact DP mass conservation failure");
         cells = next;
+        trial = next_trial;
         if !progress(trial, model.max_trials) { return Err(ExactError::Cancelled); }
     }
     let mut marginalized: HashMap<Vec<u32>, BigInt> = HashMap::new();
@@ -138,7 +149,7 @@ pub fn run_exact(
     joint.sort_by(|a, b| a.counts.cmp(&b.counts));
     Ok(ExactResult {
         numeric: "exact".into(),
-        trials: model.max_trials,
+        trials: trial,
         tracked_leaf_ids: model.tracked_leaves.iter().map(|i| model.leaves[*i].id.clone()).collect(),
         joint,
         denominator: denominator_string,

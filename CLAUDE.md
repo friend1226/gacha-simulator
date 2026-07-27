@@ -68,7 +68,7 @@ presets/            게임별 Model IR (코드 하드코딩 금지)
 
 ### 1. 빌드·테스트 통과 — 완료 (2026-07-27 확인)
 
-최초 검증에서 `cargo build --workspace && cargo test --workspace` 7/7 통과를 확인했다. exact 경로 수정 후 8/8, 병렬로 구현한 §13.3 검증을 병합한 최신 로컬 실행은 Rust 17/17 통과다. 작업 브랜치의 GitHub Actions에서도 병합 전 Rust 13/13과 UI 4/4가 통과했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
+최초 검증에서 `cargo build --workspace && cargo test --workspace` 7/7 통과를 확인했다. exact 경로 수정 후 8/8, §13.3의 전체 검증을 구현한 최신 로컬 실행은 Rust 26/26 통과다. 작업 브랜치의 GitHub Actions에서도 핵심 검증 병합 전 Rust 13/13과 UI 4/4가 통과했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
 
 ```bash
 cargo build --workspace && cargo test --workspace
@@ -84,19 +84,21 @@ cargo build --workspace && cargo test --workspace
 
 `cargo test --workspace`와 수동 이항분포 exact 스모크 테스트로 확인했다.
 
-### 3. 핵심 검증 테스트 3개 — 완료 (`docs/DESIGN.md` §13.3)
+### 3. §13.3 검증 테스트 1~7 — 완료 (`docs/DESIGN.md` §13.3)
 
-2026-07-27 병렬 구현을 병합해 다음 검증을 함께 유지하고 `cargo test --workspace` 17/17 통과를 확인했다.
+2026-07-27 다음 검증을 함께 유지하고 `cargo test --workspace` 26/26 통과를 확인했다.
 
 - **MC ↔ DP 교차 검증** — 10개 모델에서 각각 MC 10^6회 및 실제 희귀 비율 모델, Wilson 이탈 셀 5% 미만
 - **exact ↔ ScaledF64 일치** — 복합 모델의 모든 셀과 `0.007^200` 극소 셀에서 상대오차 ≤ 1e-10
 - **지급 전파** — 200회 모델의 전체 `nStar3` 분포가 정확히 +1 이동
+- **지급 의미론** — `consumesTrial × appliesTransitions` 4조합을 MC·ScaledF64 DP·ExactInt DP에서 비교
+- **해석해·골든·퍼징** — 기하/음이항 closed-form, 프리셋 2종 SHA-256 골든, 경계 IR 컴파일·실행 퍼징
 
 교차검증이 MC alias-table의 bucket 원소 소실 버그와 Wilson 경계 반올림 버그를 발견했고, 두 문제의 수정 및 직접 회귀 테스트를 완료했다.
 
 ### 4. 이후
 
-`docs/DESIGN.md` §13.3의 4번(지급 의미론 4조합, `consumesTrial` 구현 포함)부터 7번까지 진행한다. 그 뒤 §13.1(스펙 차이)과 §13.2(미구현 진단 E002/W003)를 해소한다.
+`docs/DESIGN.md` §13.2의 미구현 코어 진단 E002/W003를 우선 해소하고, §13.1의 exact 최초 달성 흡수 상태와 lazy 확률표를 이어서 검토한다.
 스냅샷·병렬화·`u64` 상태 패킹은 M8이므로 위 정확성 작업보다 먼저 손대지 않는다.
 
 ---

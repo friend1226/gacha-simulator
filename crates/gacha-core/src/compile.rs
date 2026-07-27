@@ -155,27 +155,52 @@ impl CompiledModel {
         }
     }
 
-    pub fn apply_triggers(&self, control: &mut [u32], counts: &mut [u32], trial: u32) {
+    pub fn consumed_trials_after(&self, trial: u32) -> u32 {
+        let available = self.max_trials.saturating_sub(trial);
+        let requested = self.triggers.iter()
+            .filter(|trigger| trigger.trial_count == trial)
+            .filter(|trigger| trigger.grant.as_ref().is_some_and(|grant| grant.consumes_trial))
+            .count() as u32;
+        requested.min(available)
+    }
+
+    pub fn apply_triggers(
+        &self,
+        control: &mut [u32],
+        counts: &mut [u32],
+        trial: u32,
+        mut after_grant: impl FnMut(&[u32], u32),
+    ) -> u32 {
+        let max_consumed = self.consumed_trials_after(trial);
+        let mut consumed = 0u32;
         for trigger in self.triggers.iter().filter(|t| t.trial_count == trial) {
+            let action_trial = trial + consumed;
             let before = control.to_vec();
             for (index, program) in &trigger.assignments {
                 if let Ok(value) = eval(program, |name| {
                     self.control_ids.iter().position(|id| id == name)
                         .map(|i| Rational::from_integer(before[i].into()))
-                }, trial).and_then(|v| v.number()) {
+                }, action_trial).and_then(|v| v.number()) {
                     control[*index] = value.to_integer().to_u32().unwrap_or(u32::MAX)
                         .min(self.control_max[*index]);
                 }
             }
             if let Some(grant) = &trigger.grant {
+                if grant.consumes_trial {
+                    if consumed >= max_consumed { continue; }
+                    consumed += 1;
+                }
+                let grant_trial = trial + consumed;
                 counts[grant.leaf] = counts[grant.leaf].saturating_add(grant.amount);
                 if grant.applies_transitions {
                     for _ in 0..grant.amount {
-                        self.apply_transitions(control, grant.leaf, trial);
+                        self.apply_transitions(control, grant.leaf, grant_trial);
                     }
                 }
+                after_grant(counts, grant_trial);
             }
         }
+        consumed
     }
 
     pub fn entity_count(&self, counts: &[u32], entity: &str) -> Option<u32> {
@@ -199,29 +224,45 @@ impl CompiledModel {
         found.then_some(total)
     }
 
-    pub fn apply_triggers_sparse(&self, control: &mut [u32], counts: &mut [u32], trial: u32) {
+    pub fn apply_triggers_sparse(
+        &self,
+        control: &mut [u32],
+        counts: &mut [u32],
+        trial: u32,
+        mut after_grant: impl FnMut(&[u32], u32),
+    ) -> u32 {
+        let max_consumed = self.consumed_trials_after(trial);
+        let mut consumed = 0u32;
         for trigger in self.triggers.iter().filter(|t| t.trial_count == trial) {
+            let action_trial = trial + consumed;
             let before = control.to_vec();
             for (index, program) in &trigger.assignments {
                 if let Ok(value) = eval(program, |name| {
                     self.control_ids.iter().position(|id| id == name)
                         .map(|i| Rational::from_integer(before[i].into()))
-                }, trial).and_then(|v| v.number()) {
+                }, action_trial).and_then(|v| v.number()) {
                     control[*index] = value.to_integer().to_u32().unwrap_or(u32::MAX)
                         .min(self.control_max[*index]);
                 }
             }
             if let Some(grant) = &trigger.grant {
+                if grant.consumes_trial {
+                    if consumed >= max_consumed { continue; }
+                    consumed += 1;
+                }
+                let grant_trial = trial + consumed;
                 if let Some(position) = self.state_leaves.iter().position(|leaf| *leaf == grant.leaf) {
                     counts[position] = counts[position].saturating_add(grant.amount);
                 }
                 if grant.applies_transitions {
                     for _ in 0..grant.amount {
-                        self.apply_transitions(control, grant.leaf, trial);
+                        self.apply_transitions(control, grant.leaf, grant_trial);
                     }
                 }
+                after_grant(counts, grant_trial);
             }
         }
+        consumed
     }
 }
 

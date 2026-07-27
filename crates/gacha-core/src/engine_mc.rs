@@ -100,17 +100,30 @@ pub fn run_mc(
             let mut control = model.control_init.clone();
             let mut counts = vec![0u32; model.leaves.len()];
             let mut hit = false;
-            for trial in 1..=model.max_trials {
+            let mut trial = 0u32;
+            while trial < model.max_trials {
+                let draw_trial = trial + 1;
                 let ci = model.control_index(&control);
-                let ti = if model.prob_table.trial_dependent { trial as usize - 1 } else { 0 };
+                let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
                 let leaf = tables[ci][ti].sample(&mut rng);
                 counts[leaf] += 1;
-                model.apply_transitions(&mut control, leaf, trial);
-                model.apply_triggers(&mut control, &mut counts, trial);
-                if !hit && condition_matches(model, &counts, trial) {
-                    if let Some(pmf) = &mut first_hit { pmf[trial as usize] += 1; }
+                model.apply_transitions(&mut control, leaf, draw_trial);
+                if !hit && condition_matches(model, &counts, draw_trial) {
+                    if let Some(pmf) = &mut first_hit { pmf[draw_trial as usize] += 1; }
                     hit = true;
                 }
+                let consumed = model.apply_triggers(
+                    &mut control,
+                    &mut counts,
+                    draw_trial,
+                    |grant_counts, grant_trial| {
+                        if !hit && condition_matches(model, grant_counts, grant_trial) {
+                            if let Some(pmf) = &mut first_hit { pmf[grant_trial as usize] += 1; }
+                            hit = true;
+                        }
+                    },
+                );
+                trial = draw_trial + consumed;
             }
             let key = model.tracked_leaves.iter().map(|i| counts[*i]).collect();
             *histogram.entry(key).or_default() += 1;

@@ -12,7 +12,9 @@
 - 제어상태·시행별 정확 유리수 확률표 사전계산
 - 제어 전이, 확정 지급, 제어상태 기반 동적 확률
 - 재현 가능한 xoshiro256++ MC와 alias sampling, Wilson 95% 구간
-- MC↔DP 10개 모델·희귀 비율 교차검증, exact↔ScaledF64 복합·극소확률 비교, 200회 지급 전파 회귀 테스트
+- MC↔DP 10개 모델·희귀 비율 교차검증, exact↔ScaledF64 복합·극소확률 비교, 지급 의미론 4조합과 해석해 회귀 테스트
+- `consumesTrial` 논리 시행 슬롯을 MC·ScaledF64 DP·ExactInt DP에 동일하게 구현
+- 두 프리셋 SHA-256 골든과 결정적 IR 컴파일러/엔진 퍼징
 - GitHub Actions 기반 Rust/UI CI
 - 희소 DP, 추적 리프 축소, 프루닝 손실 보고, 최초 달성 PMF/CDF
 - 정확 모드 시행/상태/메모리/분모 가드레일과 진행/취소 콜백
@@ -24,13 +26,11 @@
 
 - Exact DP의 최초 달성 흡수 모드
 - 확률표 1천만 제어상태 초과 시 lazy cache
-- `consumesTrial=true` 지급의 별도 시행 인덱스 전개
 - snapshot의 GCHS/zstd/checkpoint 직렬화
 - Rayon/Web Worker 병렬 MC와 자동 CI 폭 정지
 - 전체 E002/E005/W003 정적 구간·만족가능성 분석
 - Tauri 데스크톱 패키징
 - 10개 이상 게임 프리셋 및 골든 파일
-- 지급 의미론 4조합, 기하/음이항 해석해, IR 퍼징
 
 ## 이 환경에서 실행한 검증
 
@@ -38,7 +38,7 @@
 - TypeScript strict 타입 검사: 통과
 - Vite 프로덕션 빌드: 통과
 - 모든 Rust 파일 tree-sitter 문법 검사: 통과
-- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27 최신): 빌드 성공, 테스트 17/17 통과. 경고 1건(`compile.rs:230` `EntityDef.name` 미사용)
+- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27 최신): 빌드 성공, 테스트 26/26 통과. 경고 1건(`compile.rs` `EntityDef.name` 미사용)
 
 ## 2026-07-27 감사 (설계문서 vs 코드 정합성)
 
@@ -88,3 +88,10 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - 컨플릭트 해결 4개 파일에 잔여 마커 없음을 확인했다.
 - 이전 리뷰에서 지적한 `report.rs`의 Wilson 하한 버그(`successes=0`일 때 정확히 0.0이 아닌 문제)가 병합된 수정으로 해소됐음을 재확인했다.
 - 다음 우선순위: `docs/DESIGN.md` §13.1의 `consumesTrial` 미배선 해소 → §13.3 4번(지급 의미론 4조합) → 5~7번(해석해 대조, 프리셋 골든 파일, IR 퍼징) 순.
+
+## 2026-07-27 §13.3 잔여 검증 완료
+
+- `consumesTrial`을 세 엔진에 배선하고 지급 슬롯·최초 달성·마지막 시행 경계를 회귀 테스트로 고정했다.
+- 지급 의미론 4조합을 MC·ScaledF64 DP·ExactInt DP에서 비교했다.
+- 기하분포·음이항분포 closed-form 대조, 프리셋 2종 골든, 결정적 IR 퍼징을 추가했다.
+- 로컬 `cargo test --workspace`: **26/26 통과**. 다음 정확성 우선순위는 E002/W003 코어 진단과 exact 최초 달성 흡수 모드다.

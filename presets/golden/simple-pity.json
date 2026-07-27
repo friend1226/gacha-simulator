@@ -1,0 +1,10 @@
+{
+  "presetSha256": "c8a2bf5ea92f8936a1c61e1a252063b696a584eb9179afeb405b424617ba9a8a",
+  "resultSha256": "cfcb35d366d343bfff59e9782e93b27d125abae69abe4883aedd3f4b9d008ed0",
+  "numeric": "scaled",
+  "trials": 180,
+  "trackedLeafIds": ["rare"],
+  "jointCells": 0,
+  "remainingMass": "0.00000000000e0",
+  "hasFirstHit": true
+}

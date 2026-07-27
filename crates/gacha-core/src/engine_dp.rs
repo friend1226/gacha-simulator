@@ -103,11 +103,15 @@ fn run_generic<P: Prob>(
     let mut hit_pmf = model.condition.as_ref().map(|_| vec![P::zero(); model.max_trials as usize + 1]);
     let mut pruned_mass = 0.0;
     let mut completed_trials = 0;
-    for trial in 1..=model.max_trials {
+    let mut trial = 0u32;
+    while trial < model.max_trials {
+        let draw_trial = trial + 1;
+        let consumed_trials = model.consumed_trials_after(draw_trial);
+        let next_trial = draw_trial + consumed_trials;
         let mut next: HashMap<State, P> = HashMap::new();
         for (state, mass) in layer {
             let ci = model.control_index(&state.control);
-            let ti = if model.prob_table.trial_dependent { trial as usize - 1 } else { 0 };
+            let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
             for (leaf, p_leaf) in converted[ci][ti].iter().enumerate() {
                 if p_leaf.is_zero() { continue; }
                 let contribution = mass.mul(p_leaf);
@@ -115,10 +119,25 @@ fn run_generic<P: Prob>(
                 if let Some(position) = model.state_leaves.iter().position(|tracked| *tracked == leaf) {
                     successor.counts[position] += 1;
                 }
-                model.apply_transitions(&mut successor.control, leaf, trial);
-                model.apply_triggers_sparse(&mut successor.control, &mut successor.counts, trial);
-                if condition_matches_sparse(model, &successor.counts, trial) {
-                    if let Some(pmf) = &mut hit_pmf { pmf[trial as usize].add_assign(&contribution); }
+                model.apply_transitions(&mut successor.control, leaf, draw_trial);
+                if condition_matches_sparse(model, &successor.counts, draw_trial) {
+                    if let Some(pmf) = &mut hit_pmf { pmf[draw_trial as usize].add_assign(&contribution); }
+                    continue;
+                }
+                let mut grant_hit = None;
+                let applied_consumed = model.apply_triggers_sparse(
+                    &mut successor.control,
+                    &mut successor.counts,
+                    draw_trial,
+                    |grant_counts, grant_trial| {
+                        if grant_hit.is_none() && condition_matches_sparse(model, grant_counts, grant_trial) {
+                            grant_hit = Some(grant_trial);
+                        }
+                    },
+                );
+                debug_assert_eq!(applied_consumed, consumed_trials);
+                if let Some(hit_trial) = grant_hit {
+                    if let Some(pmf) = &mut hit_pmf { pmf[hit_trial as usize].add_assign(&contribution); }
                     continue;
                 }
                 next.entry(successor).or_insert_with(P::zero).add_assign(&contribution);
@@ -132,7 +151,8 @@ fn run_generic<P: Prob>(
             });
         }
         layer = next;
-        completed_trials = trial;
+        completed_trials = next_trial;
+        trial = next_trial;
         if !progress(trial, model.max_trials) { break; }
     }
     let mut joint: HashMap<Vec<u32>, P> = HashMap::new();

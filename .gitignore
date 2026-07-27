@@ -3,3 +3,4 @@
 /ui/dist
 /ui/*.tsbuildinfo
 *.gchs
+/.claude/
