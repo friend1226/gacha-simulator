@@ -68,34 +68,28 @@ presets/            게임별 Model IR (코드 하드코딩 금지)
 
 ### 1. 빌드·테스트 통과 — 완료 (2026-07-27 확인)
 
-`cargo build --workspace && cargo test --workspace`를 이 환경에서 처음 실행해 빌드 성공, 테스트 7/7 통과를 확인했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
+최초 검증에서 `cargo build --workspace && cargo test --workspace` 7/7 통과를 확인했고, 최신 GitHub Actions에서는 §13.3 테스트를 포함해 Rust 13/13과 UI 4/4가 통과했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
 
 ```bash
 cargo build --workspace && cargo test --workspace
 ```
 
-### 2. exact 모드 오작동 버그 — 신규 최우선 (`docs/DESIGN.md` §13.5)
+### 2. exact 모드 오작동 버그 — 완료
 
-2026-07-27 감사에서 발견. **코드 수정은 아직 하지 않았다.**
+exact DP 배선, UI 호출, 결과 메타데이터와 clamp 보고를 수정했고 PR #2 검증까지 완료했다.
 
-- `numeric: "exact"`를 선택해도 `dp` 커맨드/`run_dp_json`이 조용히 `ScaledF64`로 강등되어 실행되고, 출력에도 `"numeric": "scaled"`라고 잘못 표시된다 (`engine_dp.rs:60-64`). 에러·경고 없음
-- `ui/src/App.tsx`의 "정확" 드롭다운은 `run_exact_json`을 아예 호출하지 않아 웹에서 이 문제가 완전히 은폐된다
-- `engine_exact.rs`의 `ExactResult`에 `clamp_events` 필드가 없어 exact 모드의 확률 clamp 이벤트가 보고되지 않음 (절대 규칙 7 부분 위반)
+### 3. 핵심 검증 테스트 3개 — 완료 (`docs/DESIGN.md` §13.3/§13.4)
 
-3번(핵심 검증 테스트)에 착수하기 전에 먼저 고친다 — exact↔ScaledF64 일치 테스트가 이 배선 버그 위에서는 애초에 무의미하다.
+- MC 100만 회 ↔ DP Wilson 95% 교차검증
+- exact ↔ ScaledF64 상대오차 `≤ 1e-10` 및 `0.007^200` 극소 셀
+- 확정 픽업 지급에 따른 파생 `nStar3` 분포 +1 이동
 
-### 3. 핵심 검증 테스트 3개 (`docs/DESIGN.md` §13.3)
-
-이 셋이 없으면 이후 모든 변경이 회귀를 감지하지 못한다.
-
-- **MC ↔ DP 교차 검증** — 같은 IR로 DP와 MC(10^6회)를 돌려, DP 값이 각 셀의 Wilson 95% 구간 안에 드는지. 벗어난 셀이 5% 이상이면 실패
-- **exact ↔ ScaledF64 일치** — 상대오차 ≤ 1e-10
-- **지급 전파** — 확정 픽업 1회가 있는 모델의 `nStar3` 분포가 없는 모델 대비 정확히 +1 이동 (이중 계산이면 +2, 미전파면 +0으로 잡힌다)
+이 과정에서 MC alias table 마지막 버킷 유실과 Wilson 경계 반올림 버그도 발견·수정했다. GitHub Actions에서 Rust 13/13, UI 4/4 통과를 확인했다.
 
 ### 4. 이후
 
-`docs/DESIGN.md` §13.1(스펙 차이)과 §13.2(미구현 진단 E002/W003) 순으로 해소한다.
-스냅샷·병렬화·`u64` 상태 패킹은 M8이므로 3번이 끝나기 전에 손대지 않는다.
+`docs/DESIGN.md` §13.3의 남은 테스트(지급 의미론 4조합, 기하/음이항 해석해, 프리셋 골든, IR 퍼징)를 먼저 처리한 뒤 §13.1/§13.2를 해소한다.
+스냅샷·병렬화·`u64` 상태 패킹은 M8에서 진행한다.
 
 ---
 
