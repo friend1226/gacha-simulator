@@ -974,3 +974,9 @@ Blockly 워크스페이스 → **Model IR JSON 직렬화**. JS 코드 생성 경
 - W003은 조건의 엔티티 카운트를 배타적 리프 계수로 전개한다. 양수 확률 리프의 일반 뽑기 예산과 확정 지급을 함께 반영해 포함관계 위반, `maxTrials` 범위 위반, 영확률 엔티티의 양수 조건을 경고한다.
 - ExactInt DP도 조건 달성 시 질량을 흡수하고 최초 달성 PMF/CDF·미달성 질량을 공통분모 BigInt 분자로 반환한다. `reduceLayers` 사용 시 활성·흡수 질량을 함께 약분하고 보존 검사를 수행한다.
 - 로컬 `cargo test --workspace`: **33/33 통과**. 기존 `EntityDef.name` 미사용 경고 1건 외 신규 경고 없음.
+
+**2026-07-27 §13.3 후속(W007) 및 §13.2 코어 진단 리뷰 검증**: 위 두 라운드(W007 경고 추가, E002/W003/exact 흡수)를 이 환경에서 각각 직접 체크아웃해 검증했다.
+
+- W007: `cargo test --workspace` 27/27 통과. `warn_unapplied_consuming_grants`가 런타임 `consumed_trials_after`와 동일한 판정 기준·소스 선언 순서로 정적 경고를 내는지 코드 검토로 확인했고, `compiler_warns_for_each_consuming_grant_beyond_the_remaining_budget` 회귀 테스트가 한 trialCount에 여러 지급이 겹치는 경계 케이스까지 커버함을 확인했다.
+- E002/W003/exact 흡수: `cargo test --workspace` 33/33 통과. `AffineExpr`가 `pity - pity` 같은 상관항을 계수 단계에서 정확히 소거해 오탐하지 않음을 확인했고, W003의 리프 계수 전개가 "리프 카운트 합이 `maxTrials`로 제약되는 심플렉스" 구조(독립 박스 제약이 아님)를 올바르게 반영함을 확인했다. ExactInt 흡수는 `hit_pmf`가 `next`와 동일한 레이어 공통분모 스킴을 사용해 절대 규칙 1을 준수하고, 매 레이어 `assert_eq!` 질량보존 검사가 실제로 걸려 있어 흡수 로직의 정확성이 런타임에서 스스로 검증됨을 확인했다.
+- 코드 결함 없음. CLAUDE.md §4가 명시한 정확성 최우선 작업(§13.1/§13.2/§13.3)이 이 시점으로 모두 완료됐고, 다음은 M8(성능/인프라) 또는 프리셋 확장 등 별도 우선순위 결정이 필요한 단계다.
