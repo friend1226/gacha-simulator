@@ -201,8 +201,132 @@ fn summarize_first_hit<P: Prob>(pmf: &[P]) -> FirstHitResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{compile, ir::ModelIr};
+    use crate::engine_mc::{run_mc, McOptions};
+    use crate::ir::{ModelIr, Trigger};
+    use crate::{compile, run_exact, ExactOptions};
     use serde_json::json;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    const WILSON_95_Z: f64 = 1.959963984540054;
+
+    fn bernoulli_ir(name: &str, probability: &str, max_trials: u32) -> ModelIr {
+        serde_json::from_value(json!({
+            "irVersion": 1,
+            "name": name,
+            "entities": [{"id": "hit", "name": "hit", "prob": {"lit": probability}}],
+            "stateVars": [],
+            "probRules": [],
+            "transitions": [],
+            "triggers": [],
+            "run": {"maxTrials": max_trials, "trackJoint": ["hit"], "numeric": "scaled"}
+        })).unwrap()
+    }
+
+    fn cross_validation_models() -> Vec<ModelIr> {
+        let mut models = vec![
+            bernoulli_ir("coin", "1/2", 4),
+            bernoulli_ir("one-third", "1/3", 5),
+            bernoulli_ir("two-fifths", "2/5", 6),
+            bernoulli_ir("three-quarters", "3/4", 4),
+            serde_json::from_value(json!({
+                "irVersion": 1,
+                "name": "two top-level entities",
+                "entities": [
+                    {"id": "rare", "name": "rare", "prob": {"lit": "1/4"}},
+                    {"id": "bonus", "name": "bonus", "prob": {"lit": "1/5"}}
+                ],
+                "stateVars": [],
+                "probRules": [],
+                "transitions": [],
+                "triggers": [],
+                "run": {
+                    "maxTrials": 4,
+                    "trackJoint": ["rare", "bonus"],
+                    "numeric": "scaled"
+                }
+            })).unwrap(),
+            serde_json::from_value(json!({
+                "irVersion": 1,
+                "name": "nested entity",
+                "entities": [{
+                    "id": "rare",
+                    "name": "rare",
+                    "prob": {"lit": "1/2"},
+                    "children": [{"id": "pickup", "name": "pickup", "prob": {"lit": "1/5"}}]
+                }],
+                "stateVars": [],
+                "probRules": [],
+                "transitions": [],
+                "triggers": [],
+                "run": {
+                    "maxTrials": 4,
+                    "trackJoint": ["pickup", "rare__self"],
+                    "numeric": "scaled"
+                }
+            })).unwrap(),
+            serde_json::from_value(json!({
+                "irVersion": 1,
+                "name": "grant after normal draw",
+                "entities": [{"id": "hit", "name": "hit", "prob": {"lit": "1/3"}}],
+                "stateVars": [],
+                "probRules": [],
+                "transitions": [],
+                "triggers": [{
+                    "at": {"trialCount": 3},
+                    "grant": {
+                        "leaf": "hit",
+                        "amount": 1,
+                        "consumesTrial": false,
+                        "appliesTransitions": false
+                    }
+                }],
+                "run": {"maxTrials": 5, "trackJoint": ["hit"], "numeric": "scaled"}
+            })).unwrap(),
+            serde_json::from_value(json!({
+                "irVersion": 1,
+                "name": "state-dependent pity",
+                "entities": [{"id": "hit", "name": "hit", "prob": {"lit": "1/4"}}],
+                "stateVars": [{"id": "pity", "init": 0, "max": 2, "role": "control"}],
+                "probRules": [{
+                    "target": "hit",
+                    "expr": {
+                        "if": {"ge": [{"var": "pity"}, {"lit": "2"}]},
+                        "then": {"lit": "3/4"},
+                        "else": {"lit": "1/4"}
+                    }
+                }],
+                "transitions": [
+                    {"when": {"leafOf": "hit"}, "set": {"pity": {"lit": "0"}}},
+                    {
+                        "when": {"not": {"leafOf": "hit"}},
+                        "set": {"pity": {"add": [{"var": "pity"}, {"lit": "1"}]}}
+                    }
+                ],
+                "triggers": [],
+                "run": {"maxTrials": 6, "trackJoint": ["hit"], "numeric": "scaled"}
+            })).unwrap(),
+        ];
+
+        let mut blue_archive: ModelIr =
+            serde_json::from_str(include_str!("../../../presets/blue-archive-pickup.json")).unwrap();
+        blue_archive.name = "blue archive preset (short CI horizon)".into();
+        blue_archive.run.max_trials = 4;
+        models.push(blue_archive);
+
+        let mut simple_pity: ModelIr =
+            serde_json::from_str(include_str!("../../../presets/simple-pity.json")).unwrap();
+        simple_pity.name = "simple pity preset (near-pity CI horizon)".into();
+        simple_pity.state_vars[0].init = 87;
+        simple_pity.run.max_trials = 5;
+        simple_pity.run.condition = None;
+        models.push(simple_pity);
+
+        models
+    }
+
+    fn probability_map(result: &DpResult) -> BTreeMap<Vec<u32>, f64> {
+        result.joint.iter().map(|cell| (cell.counts.clone(), cell.probability)).collect()
+    }
 
     #[test]
     fn binomial_mass_is_conserved() {
@@ -246,5 +370,195 @@ mod tests {
             result.joint.iter().map(|cell| cell.numerator.as_str()).collect::<Vec<_>>(),
             vec!["9", "6", "1"],
         );
+    }
+
+    #[test]
+    fn monte_carlo_and_dp_cross_validate_for_ten_models() {
+        const RUNS: u64 = 1_000_000;
+
+        let models = cross_validation_models();
+        assert_eq!(models.len(), 10, "§9.1 requires at least ten cross-validation models");
+
+        let mut checked_cells = 0usize;
+        let mut outliers = Vec::new();
+        for (case, ir) in models.into_iter().enumerate() {
+            let model = compile(&ir).unwrap();
+            let dp = run_generic::<ScaledF64>(
+                &model,
+                DpOptions { prune_log10: None },
+                |_, _| true,
+                "scaled",
+            );
+            let mc = run_mc(
+                &model,
+                McOptions {
+                    runs: RUNS,
+                    seed: 0x5eed_cafe_u64 + case as u64,
+                    confidence_z: WILSON_95_Z,
+                    batch_size: 100_000,
+                },
+                |_, _| true,
+            );
+
+            assert_eq!(mc.runs, RUNS);
+            assert_eq!(mc.tracked_leaf_ids, dp.tracked_leaf_ids);
+            let dp_cells = probability_map(&dp);
+            let mc_cells: BTreeMap<_, _> = mc.joint.iter()
+                .map(|cell| (cell.counts.clone(), cell.interval))
+                .collect();
+            let keys: BTreeSet<_> = dp_cells.keys().chain(mc_cells.keys()).cloned().collect();
+            for counts in keys {
+                let probability = dp_cells.get(&counts).copied().unwrap_or(0.0);
+                let interval = mc_cells.get(&counts).copied()
+                    .unwrap_or_else(|| crate::report::wilson(0, RUNS, WILSON_95_Z));
+                checked_cells += 1;
+                if probability < interval.lower || probability > interval.upper {
+                    outliers.push(format!(
+                        "{} {:?}: DP={probability:.12e}, Wilson=[{:.12e}, {:.12e}]",
+                        model.name, counts, interval.lower, interval.upper,
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            outliers.len() * 100 < checked_cells * 5,
+            "{} of {checked_cells} cells ({:.2}%) fell outside Wilson 95% intervals:\n{}",
+            outliers.len(),
+            outliers.len() as f64 * 100.0 / checked_cells as f64,
+            outliers.join("\n"),
+        );
+    }
+
+    #[test]
+    fn exact_and_scaled_dp_agree_within_relative_error() {
+        let ir: ModelIr = serde_json::from_value(json!({
+            "irVersion": 1,
+            "name": "exact-scaled parity",
+            "entities": [{
+                "id": "star3",
+                "name": "star3",
+                "prob": {"lit": "2/5"},
+                "children": [{"id": "pickup", "name": "pickup", "prob": {"lit": "1/7"}}]
+            }],
+            "stateVars": [{"id": "pity", "init": 0, "max": 2, "role": "control"}],
+            "probRules": [{
+                "target": "star3",
+                "expr": {
+                    "if": {"ge": [{"var": "pity"}, {"lit": "2"}]},
+                    "then": {"lit": "3/5"},
+                    "else": {"lit": "2/5"}
+                }
+            }],
+            "transitions": [
+                {"when": {"leafOf": "star3"}, "set": {"pity": {"lit": "0"}}},
+                {
+                    "when": {"not": {"leafOf": "star3"}},
+                    "set": {"pity": {"add": [{"var": "pity"}, {"lit": "1"}]}}
+                }
+            ],
+            "triggers": [{
+                "at": {"trialCount": 7},
+                "grant": {
+                    "leaf": "pickup",
+                    "amount": 1,
+                    "consumesTrial": false,
+                    "appliesTransitions": true
+                }
+            }],
+            "run": {
+                "maxTrials": 12,
+                "trackJoint": ["pickup", "star3__self"],
+                "numeric": "exact"
+            }
+        })).unwrap();
+        let model = compile(&ir).unwrap();
+        let exact = run_exact(&model, ExactOptions::default(), |_, _| true).unwrap();
+        let scaled = run_generic::<ScaledF64>(
+            &model,
+            DpOptions { prune_log10: None },
+            |_, _| true,
+            "scaled",
+        );
+
+        assert_eq!(exact.tracked_leaf_ids, scaled.tracked_leaf_ids);
+        let exact_cells: BTreeMap<_, _> = exact.joint.iter()
+            .map(|cell| (cell.counts.clone(), cell.probability))
+            .collect();
+        let scaled_cells = probability_map(&scaled);
+        assert_eq!(exact_cells.keys().collect::<Vec<_>>(), scaled_cells.keys().collect::<Vec<_>>());
+        for (counts, expected) in exact_cells {
+            let actual = scaled_cells[&counts];
+            let relative_error = (actual - expected).abs() / expected.abs().max(f64::MIN_POSITIVE);
+            assert!(
+                relative_error <= 1e-10,
+                "{counts:?}: exact={expected:.16e}, scaled={actual:.16e}, relative error={relative_error:.3e}",
+            );
+        }
+    }
+
+    #[test]
+    fn guaranteed_pickup_shifts_parent_entity_distribution_by_one() {
+        let base: ModelIr = serde_json::from_value(json!({
+            "irVersion": 1,
+            "name": "grant propagation baseline",
+            "entities": [{
+                "id": "star3",
+                "name": "star3",
+                "prob": {"lit": "0.03"},
+                "children": [{"id": "pickup", "name": "pickup", "prob": {"lit": "0.007"}}]
+            }],
+            "stateVars": [],
+            "probRules": [],
+            "transitions": [],
+            "triggers": [],
+            "run": {"maxTrials": 200, "trackJoint": ["star3"], "numeric": "scaled"}
+        })).unwrap();
+        let mut granted = base.clone();
+        granted.name = "grant propagation with pickup".into();
+        granted.triggers = serde_json::from_value::<Vec<Trigger>>(json!([{
+            "at": {"trialCount": 200},
+            "grant": {
+                "leaf": "pickup",
+                "amount": 1,
+                "consumesTrial": false,
+                "appliesTransitions": true
+            }
+        }])).unwrap();
+
+        let baseline_model = compile(&base).unwrap();
+        let granted_model = compile(&granted).unwrap();
+        let baseline = run_generic::<ScaledF64>(
+            &baseline_model,
+            DpOptions { prune_log10: None },
+            |_, _| true,
+            "scaled",
+        );
+        let with_grant = run_generic::<ScaledF64>(
+            &granted_model,
+            DpOptions { prune_log10: None },
+            |_, _| true,
+            "scaled",
+        );
+
+        fn parent_distribution(result: &DpResult) -> BTreeMap<u32, f64> {
+            let mut distribution = BTreeMap::new();
+            for cell in &result.joint {
+                *distribution.entry(cell.counts.iter().sum()).or_default() += cell.probability;
+            }
+            distribution
+        }
+
+        let baseline_star3 = parent_distribution(&baseline);
+        let granted_star3 = parent_distribution(&with_grant);
+        assert!(!granted_star3.contains_key(&0));
+        assert_eq!(baseline_star3.len(), granted_star3.len());
+        for (count, probability) in baseline_star3 {
+            let shifted = granted_star3.get(&(count + 1)).copied().unwrap_or_default();
+            assert!(
+                (shifted - probability).abs() <= 1e-12,
+                "nStar3={count} did not shift exactly once: baseline={probability:.16e}, shifted={shifted:.16e}",
+            );
+        }
     }
 }

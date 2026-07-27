@@ -58,7 +58,9 @@ impl AliasTable {
         for (i, &p) in scaled.iter().enumerate() {
             if p < 1.0 { small.push(i); } else { large.push(i); }
         }
-        while let (Some(s), Some(l)) = (small.pop(), large.pop()) {
+        while !small.is_empty() && !large.is_empty() {
+            let s = small.pop().expect("small alias bucket");
+            let l = large.pop().expect("large alias bucket");
             probability[s] = scaled[s];
             alias[s] = l;
             scaled[l] = scaled[l] + scaled[s] - 1.0;
@@ -145,5 +147,21 @@ fn condition_matches(model: &CompiledModel, counts: &[u32], trial: u32) -> bool 
 fn lower_first(value: &str) -> String {
     let mut chars = value.chars();
     chars.next().map(|c| c.to_lowercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alias_table_keeps_columns_when_one_bucket_is_empty() {
+        let equal = AliasTable::new(&[0.5, 0.5]);
+        assert_eq!(equal.probability, vec![1.0, 1.0]);
+        assert_eq!(equal.alias, vec![0, 1]);
+
+        let skewed = AliasTable::new(&[0.2, 0.8]);
+        assert_eq!(skewed.probability, vec![0.4, 1.0]);
+        assert_eq!(skewed.alias, vec![1, 1]);
+    }
 }
 

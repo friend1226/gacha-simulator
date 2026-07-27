@@ -12,6 +12,7 @@
 - 제어상태·시행별 정확 유리수 확률표 사전계산
 - 제어 전이, 확정 지급, 제어상태 기반 동적 확률
 - 재현 가능한 xoshiro256++ MC와 alias sampling, Wilson 95% 구간
+- MC↔DP 10개 모델 교차검증, exact↔ScaledF64 일치, 200회 지급 전파 회귀 테스트
 - 희소 DP, 추적 리프 축소, 프루닝 손실 보고, 최초 달성 PMF/CDF
 - 정확 모드 시행/상태/메모리/분모 가드레일과 진행/취소 콜백
 - CLI 검증/DP/exact/MC 명령과 WASM JSON API
@@ -35,7 +36,7 @@
 - TypeScript strict 타입 검사: 통과
 - Vite 프로덕션 빌드: 통과
 - 모든 Rust 파일 tree-sitter 문법 검사: 통과
-- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27): 빌드 성공, 테스트 7/7 통과. 경고 1건(`compile.rs:230` `EntityDef.name` 미사용)
+- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27 최신): 빌드 성공, 테스트 12/12 통과. 경고 1건(`compile.rs:230` `EntityDef.name` 미사용)
 
 ## 2026-07-27 감사 (설계문서 vs 코드 정합성)
 
@@ -64,3 +65,13 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - 수동 스모크 테스트: `numeric: "exact"` 모델을 `dp` 커맨드로 실행 → `"numeric": "exact"` + BigInt 분자(`1,4,6,4,1`)/분모(`16`)로 이항분포와 정확히 일치. exact 강등 버그·UI 미배선 버그·`clamp_events` 누락이 모두 실제로 해결됐음을 확인
 - 코드 수정 없이 문서만 갱신(`docs/DESIGN.md` §13.4에 검증 기록 추가) 후 push
 - 다음 우선순위는 변경 없음: §13.3의 3대 핵심 테스트(MC↔DP 교차검증, exact↔ScaledF64 일치, 지급 전파)
+
+## 2026-07-27 §13.3 최우선 테스트 및 MC 수정
+
+- §13.3 우선순위 1~3 구현:
+  - 10개 모델 각각 MC 10^6회 ↔ ScaledF64 DP Wilson 95% 교차검증
+  - 중첩·동적 확률·전이·지급 모델의 exact ↔ ScaledF64 전 셀 상대오차 ≤ 1e-10 검증
+  - 200회 확정 픽업 지급 시 전체 `nStar3` 분포가 정확히 +1 이동하는지 검증
+- 최초 교차검증에서 86셀 중 78셀이 이탈해 MC alias-table 버그를 발견했다. 한 bucket이 빈 상태에서 튜플 `pop()`이 다른 bucket 원소까지 버리던 루프를 수정하고 직접 회귀 테스트를 추가했다.
+- `cargo test --workspace`: **12/12 통과**. 기존 경고 `EntityDef.name` 미사용 1건 외 신규 경고 없음.
+- §13.3 잔여: 지급 의미론 4조합, 기하/음이항 해석해, 프리셋 골든 파일, IR 퍼징.

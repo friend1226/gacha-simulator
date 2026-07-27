@@ -68,34 +68,36 @@ presets/            게임별 Model IR (코드 하드코딩 금지)
 
 ### 1. 빌드·테스트 통과 — 완료 (2026-07-27 확인)
 
-`cargo build --workspace && cargo test --workspace`를 이 환경에서 처음 실행해 빌드 성공, 테스트 7/7 통과를 확인했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
+`cargo build --workspace && cargo test --workspace`를 이 환경에서 실행해 빌드 성공을 확인했다. 최초 검증은 7/7, exact 경로 수정 후 8/8, §13.3 최우선 테스트와 MC 수정 후 최신 검증은 12/12 통과다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
 
 ```bash
 cargo build --workspace && cargo test --workspace
 ```
 
-### 2. exact 모드 오작동 버그 — 신규 최우선 (`docs/DESIGN.md` §13.5)
+### 2. exact 모드 오작동 버그 — 완료 (`docs/DESIGN.md` §13.4)
 
-2026-07-27 감사에서 발견. **코드 수정은 아직 하지 않았다.**
+2026-07-27 감사에서 발견한 다음 세 문제는 PR #2에서 수정하고 실행 검증했다.
 
-- `numeric: "exact"`를 선택해도 `dp` 커맨드/`run_dp_json`이 조용히 `ScaledF64`로 강등되어 실행되고, 출력에도 `"numeric": "scaled"`라고 잘못 표시된다 (`engine_dp.rs:60-64`). 에러·경고 없음
-- `ui/src/App.tsx`의 "정확" 드롭다운은 `run_exact_json`을 아예 호출하지 않아 웹에서 이 문제가 완전히 은폐된다
-- `engine_exact.rs`의 `ExactResult`에 `clamp_events` 필드가 없어 exact 모드의 확률 clamp 이벤트가 보고되지 않음 (절대 규칙 7 부분 위반)
+- `numeric: "exact"` DP 경로가 BigInt exact 엔진으로 정상 위임된다.
+- UI "정확" 옵션이 `run_exact_json`을 호출한다.
+- exact 결과가 `numeric: "exact"`와 `clamp_events`를 보고한다.
 
-3번(핵심 검증 테스트)에 착수하기 전에 먼저 고친다 — exact↔ScaledF64 일치 테스트가 이 배선 버그 위에서는 애초에 무의미하다.
+`cargo test --workspace`와 수동 이항분포 exact 스모크 테스트로 확인했다.
 
-### 3. 핵심 검증 테스트 3개 (`docs/DESIGN.md` §13.3)
+### 3. 핵심 검증 테스트 3개 — 완료 (`docs/DESIGN.md` §13.3)
 
-이 셋이 없으면 이후 모든 변경이 회귀를 감지하지 못한다.
+2026-07-27 다음 테스트를 추가하고 `cargo test --workspace` 12/12 통과를 확인했다.
 
-- **MC ↔ DP 교차 검증** — 같은 IR로 DP와 MC(10^6회)를 돌려, DP 값이 각 셀의 Wilson 95% 구간 안에 드는지. 벗어난 셀이 5% 이상이면 실패
-- **exact ↔ ScaledF64 일치** — 상대오차 ≤ 1e-10
-- **지급 전파** — 확정 픽업 1회가 있는 모델의 `nStar3` 분포가 없는 모델 대비 정확히 +1 이동 (이중 계산이면 +2, 미전파면 +0으로 잡힌다)
+- **MC ↔ DP 교차 검증** — 10개 모델에서 각각 MC 10^6회, Wilson 이탈 셀 5% 미만
+- **exact ↔ ScaledF64 일치** — 모든 셀 상대오차 ≤ 1e-10
+- **지급 전파** — 200회 모델의 전체 `nStar3` 분포가 정확히 +1 이동
+
+교차검증이 MC alias-table의 bucket 원소 소실 버그를 발견했고 수정 및 직접 회귀 테스트까지 완료했다.
 
 ### 4. 이후
 
-`docs/DESIGN.md` §13.1(스펙 차이)과 §13.2(미구현 진단 E002/W003) 순으로 해소한다.
-스냅샷·병렬화·`u64` 상태 패킹은 M8이므로 3번이 끝나기 전에 손대지 않는다.
+`docs/DESIGN.md` §13.3의 4번(지급 의미론 4조합, `consumesTrial` 구현 포함)부터 7번까지 진행한다. 그 뒤 §13.1(스펙 차이)과 §13.2(미구현 진단 E002/W003)를 해소한다.
+스냅샷·병렬화·`u64` 상태 패킹은 M8이므로 위 정확성 작업보다 먼저 손대지 않는다.
 
 ---
 
