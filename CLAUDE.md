@@ -68,25 +68,19 @@ presets/            게임별 Model IR (코드 하드코딩 금지)
 
 ### 1. 빌드·테스트 통과 — 완료 (2026-07-27 확인)
 
-`cargo build --workspace && cargo test --workspace`를 이 환경에서 처음 실행해 빌드 성공, 테스트 7/7 통과를 확인했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
+`cargo build --workspace && cargo test --workspace`를 이 환경에서 처음 실행해 빌드 성공을 확인했다 (`docs/DESIGN.md` §13.4, `docs/STATUS.md`). 테스트는 PR #2의 exact 디스패치 테스트가 추가되어 현재 8/8 통과. 회귀 방지를 위해 앞으로도 변경 시 계속 돌린다.
 
 ```bash
 cargo build --workspace && cargo test --workspace
 ```
 
-### 2. exact 모드 오작동 버그 — 신규 최우선 (`docs/DESIGN.md` §13.5)
+### 2. exact 모드 오작동 버그 — 완료 (2026-07-27 PR #2, 같은 날 리뷰로 재검증)
 
-2026-07-27 감사에서 발견. **코드 수정은 아직 하지 않았다.**
+2026-07-27 감사에서 발견한 3건(exact→ScaledF64 조용한 강등, UI "정확" 옵션 미배선, `ExactResult.clamp_events` 누락) 모두 PR #2에서 수정됐고, 리뷰 과정에서 `cargo test --workspace`(8/8) + `dp` 커맨드 수동 스모크 테스트로 재검증했다. 상세: `docs/DESIGN.md` §13.4 마지막 항목, `docs/STATUS.md` "PR #2 리뷰" 절.
 
-- `numeric: "exact"`를 선택해도 `dp` 커맨드/`run_dp_json`이 조용히 `ScaledF64`로 강등되어 실행되고, 출력에도 `"numeric": "scaled"`라고 잘못 표시된다 (`engine_dp.rs:60-64`). 에러·경고 없음
-- `ui/src/App.tsx`의 "정확" 드롭다운은 `run_exact_json`을 아예 호출하지 않아 웹에서 이 문제가 완전히 은폐된다
-- `engine_exact.rs`의 `ExactResult`에 `clamp_events` 필드가 없어 exact 모드의 확률 clamp 이벤트가 보고되지 않음 (절대 규칙 7 부분 위반)
+### 3. 핵심 검증 테스트 3개 — 다음 최우선 (`docs/DESIGN.md` §13.3)
 
-3번(핵심 검증 테스트)에 착수하기 전에 먼저 고친다 — exact↔ScaledF64 일치 테스트가 이 배선 버그 위에서는 애초에 무의미하다.
-
-### 3. 핵심 검증 테스트 3개 (`docs/DESIGN.md` §13.3)
-
-이 셋이 없으면 이후 모든 변경이 회귀를 감지하지 못한다.
+이 셋이 없으면 이후 모든 변경이 회귀를 감지하지 못한다. exact 배선 버그가 해소됐으므로 이제 착수 가능하다.
 
 - **MC ↔ DP 교차 검증** — 같은 IR로 DP와 MC(10^6회)를 돌려, DP 값이 각 셀의 Wilson 95% 구간 안에 드는지. 벗어난 셀이 5% 이상이면 실패
 - **exact ↔ ScaledF64 일치** — 상대오차 ≤ 1e-10
