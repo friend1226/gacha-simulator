@@ -1,4 +1,5 @@
 use crate::compile::CompiledModel;
+use crate::engine_exact::{run_exact, ExactError, ExactOptions, ExactResult};
 use crate::ir::NumericBackend;
 use crate::numeric::{F64, Prob, ScaledF64};
 use serde::Serialize;
@@ -43,6 +44,13 @@ pub struct DpResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum DpRunResult {
+    Approximate(DpResult),
+    Exact(ExactResult),
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FirstHitResult {
     pub pmf: Vec<f64>,
@@ -56,11 +64,16 @@ pub fn run_dp(
     model: &CompiledModel,
     options: DpOptions,
     progress: impl FnMut(u32, u32) -> bool,
-) -> DpResult {
+) -> Result<DpRunResult, ExactError> {
     match model.numeric {
-        NumericBackend::F64 => run_generic::<F64>(model, options, progress, "f64"),
-        NumericBackend::Scaled | NumericBackend::Exact =>
+        NumericBackend::F64 => Ok(DpRunResult::Approximate(
+            run_generic::<F64>(model, options, progress, "f64"),
+        )),
+        NumericBackend::Scaled => Ok(DpRunResult::Approximate(
             run_generic::<ScaledF64>(model, options, progress, "scaled"),
+        )),
+        NumericBackend::Exact => run_exact(model, ExactOptions::default(), progress)
+            .map(DpRunResult::Exact),
     }
 }
 
@@ -199,9 +212,39 @@ mod tests {
             "run":{"maxTrials":10,"trackJoint":["hit"],"numeric":"scaled"}
         })).unwrap();
         let model = compile(&ir).unwrap();
-        let result = run_dp(&model, DpOptions { prune_log10: None }, |_,_| true);
+        let result = run_dp(&model, DpOptions { prune_log10: None }, |_,_| true).unwrap();
+        let DpRunResult::Approximate(result) = result else {
+            panic!("scaled backend must use approximate DP");
+        };
         let total: f64 = result.joint.iter().map(|c| c.probability).sum();
         assert!((total - 1.0).abs() < 1e-12);
         assert!((result.joint[5].probability - 252.0 / 1024.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn exact_numeric_dispatches_to_bigint_engine_and_reports_clamps() {
+        let ir: ModelIr = serde_json::from_value(json!({
+            "irVersion":1,"name":"clamped exact",
+            "entities":[{
+                "id":"rare","name":"rare","prob":{"lit":"1/4"},
+                "children":[{"id":"pickup","name":"pickup","prob":{"lit":"1/2"}}]
+            }],
+            "nestingPolicy":"clampChildren",
+            "stateVars":[],"probRules":[],"transitions":[],"triggers":[],
+            "run":{"maxTrials":2,"trackJoint":["pickup"],"numeric":"exact"}
+        })).unwrap();
+        let model = compile(&ir).unwrap();
+        let result = run_dp(&model, DpOptions { prune_log10: None }, |_,_| true).unwrap();
+        let DpRunResult::Exact(result) = result else {
+            panic!("exact backend must use BigInt DP");
+        };
+
+        assert_eq!(result.numeric, "exact");
+        assert_eq!(result.denominator, "16");
+        assert_eq!(result.clamp_events, 1);
+        assert_eq!(
+            result.joint.iter().map(|cell| cell.numerator.as_str()).collect::<Vec<_>>(),
+            ["9", "6", "1"],
+        );
     }
 }
