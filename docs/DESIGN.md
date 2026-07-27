@@ -881,26 +881,28 @@ Blockly 워크스페이스 → **Model IR JSON 직렬화**. JS 코드 생성 경
 
 ---
 
-## 13. 구현 현황과 스펙 차이 (v1.1 추가)
+## 13. 구현 현황과 스펙 차이 (v1.1 추가, 2026-07-27 감사로 갱신)
 
 초기 구현이 완료된 시점에 스펙과 실제 코드를 대조한 결과다.
 아래 항목은 **스펙 변경이 아니라 미구현·차이의 기록**이며, 해소되면 이 절에서 지운다.
+
+**2026-07-27 감사 노트**: 아래 §13.1/§13.2 표는 실제 코드(`crates/gacha-core/src/*.rs`)를 재대조해 여전히 정확함을 확인했다 (드리프트 없음). 단, 이 감사에서 **문서에 없던 새 버그 2건**을 발견해 §13.5에 기록했다 — 특히 §13.5-1(exact 모드 조용한 강등)은 다른 무엇보다 먼저 처리해야 하는 정확성 버그다.
 
 ### 13.1 스펙과 다르게 구현된 부분
 
 | 위치 | 스펙 | 현재 구현 | 처리 |
 |---|---|---|---|
-| §6.1 상태 인코딩 | mixed-radix `u64` 패킹 | `struct State { control: Vec<u32>, counts: Vec<u32> }` | M8에서 패킹으로 교체. 전이마다 힙 할당 2회 + Vec 해시가 발생하므로 DP 성능의 주 병목 |
-| §8 스냅샷 | GCHS 포맷 + zstd + 체크포인트 | 미구현 | M8 |
-| §5.2 병렬 | rayon / Web Worker | 단일 스레드 | M8 |
-| §7 조건 (exact) | exact 백엔드도 흡수 상태 지원 | `engine_dp`만 지원, `engine_exact`는 결합분포만 | M7 잔여 |
-| §3.6 `consumesTrial` | true면 지급이 시행을 소모 | 필드만 존재, 전개 미반영 | M5 잔여 |
-| §4.2 lazy 확률표 | 제어상태 10^7 초과 시 lazy 캐시 | 항상 사전계산 | 한계 초과 모델이 나오면 착수 |
+| §6.1 상태 인코딩 | mixed-radix `u64` 패킹 | `struct State { control: Vec<u32>, counts: Vec<u32> }` (`engine_dp.rs:19-22`, `engine_exact.rs:25-28`) | M8에서 패킹으로 교체. 전이마다 힙 할당 2회 + Vec 해시가 발생하므로 DP 성능의 주 병목 |
+| §8 스냅샷 | GCHS 포맷 + zstd + 체크포인트 | 미구현 (`snapshot`/`checkpoint`/`zstd` 관련 파일·심볼 없음) | M8 |
+| §5.2 병렬 | rayon / Web Worker | 단일 스레드. `parallel` feature flag는 선언만 있고 `#[cfg(feature = "parallel")]` 게이트가 코드에 전혀 없는 빈 스텁 | M8 |
+| §7 조건 (exact) | exact 백엔드도 흡수 상태 지원 | `engine_dp`(`condition_matches_sparse`/`hit_pmf`)만 지원, `engine_exact`는 `model.condition`/`hit_pmf` 참조 자체가 없어 결합분포만 산출 | M7 잔여 |
+| §3.6 `consumesTrial` | true면 지급이 시행을 소모 | `ir.rs:119`에 필드 존재, `compile.rs:88,608`에서 `CompiledGrant.consumes_trial`로 배선되지만 `apply_triggers`/`apply_triggers_sparse`나 세 엔진 어디에서도 값을 읽지 않음 | M5 잔여 |
+| §4.2 lazy 확률표 | 제어상태 10^7 초과 시 lazy 캐시 | `compile.rs:280-305`가 항상 즉시 사전계산. 10,000,000 초과 시 `W004` 경고(`compile.rs:282`)만 내고 그대로 계산 강행 | 한계 초과 모델이 나오면 착수 |
 
 ### 13.2 미구현 진단
 
-`compile.rs`에 없는 것: **E002**(음수 확률 정적 검출), **W003**(조건 만족가능성).
-`ui/src/validator.ts`에는 E002가 있으나 코어에는 없어 CLI 경로에서 누락된다.
+`compile.rs`에 없는 것: **E002**(음수 확률 정적 검출), **W003**(조건 만족가능성) — 두 문자열 다 `.rs`/`.ts` 전체에서 코드로 검색해도 나오지 않는다(문서에만 존재).
+`ui/src/validator.ts:54`에는 리터럴 한정 E002 체크가 있으나 코어(`compile.rs`)에는 없어 CLI/WASM 경로에서는 완전히 누락된다. `compile.rs`가 내는 것은 `E003`(음수 확률의 *런타임* 결과, 제어상태별 표 계산 중 `calculate_leaf_probs`가 음수를 만들면 `compile.rs:301` 부근에서 사후 검출)뿐이며, 이는 정적 분석이 아니다.
 W003은 §7.3의 근거대로 리프 전개 후 선형 부등식 검사로 구현한다.
 
 ### 13.3 테스트 격차 (최우선)
@@ -919,8 +921,18 @@ W003은 §7.3의 근거대로 리프 전개 후 선형 부등식 검사로 구�
 
 1~3번은 다른 어떤 작업보다 먼저 한다. 이 세 개가 없으면 이후의 모든 변경이 회귀를 감지하지 못한다.
 
-### 13.4 미검증 사항
+### 13.4 검증 이력
 
-**`cargo test`가 아직 한 번도 실행된 적이 없다.** 초기 구현 환경에 Rust 툴체인이 없었다.
-따라서 워크스페이스가 컴파일되는지조차 확인되지 않은 상태다.
-다른 작업에 앞서 `cargo build --workspace && cargo test --workspace`를 통과시킨다.
+**2026-07-27**: `cargo build --workspace && cargo test --workspace`를 이 환경에서 처음 실행해 확인했다. **빌드 성공, 테스트 7/7 통과** (경고 1건: `compile.rs:230`의 `EntityDef.name` 미사용 dead code). v1.1 원문의 "cargo test가 아직 한 번도 실행된 적이 없다"는 서술은 이 시점부로 해소되었다 — `docs/STATUS.md`도 함께 갱신했다.
+
+다만 통과하는 7개 테스트 중 DP 정확성을 실제로 검증하는 것은 `engine_dp.rs`의 이항분포 대조(`binomial_mass_is_conserved`) 1건뿐이고, MC·exact 백엔드를 검증하는 테스트는 여전히 0건이다. 즉 §13.3의 3대 핵심 테스트 부재는 그대로 유효하다.
+
+### 13.5 신규 발견 버그 (2026-07-27 감사, §13.3보다 먼저 처리)
+
+이 감사에서 스펙 문서에 없던 실제 정확성 버그 2건과 절대 규칙 7의 부분 위반 1건을 발견했다. 코드 수정은 이번 라운드에서 하지 않았고, 다음 작업자(Codex 등)가 §13.3 테스트에 착수하기 전에 먼저 고쳐야 한다 — 아래 버그들은 그 3대 테스트가 검증 대상으로 삼아야 할 동작 자체를 침범한다.
+
+1. **`numeric: "exact"`가 조용히 `ScaledF64`로 강등된다.** `engine_dp.rs:60-64`의 `run_dp`가 `match model.numeric { F64 => ..., Scaled | Exact => run_generic::<ScaledF64>(..., "scaled") }` 형태로 되어 있어, IR의 `run.numeric`이 `"exact"`여도 `dp` CLI 커맨드와 `run_dp_json`(WASM)은 근사 백엔드로 실행되고 **출력 메타데이터에도 `"numeric": "scaled"`라고 표시된다.** 에러도 경고도 없다. 진짜 정확 계산은 별도의 `exact` 커맨드/`run_exact_json`에서만 일어나며, 이는 `model.run.numeric`을 아예 참조하지 않고 자신의 시행/상태/메모리 가드레일(§2.3)만 본다. 사용자가 "정확" 모드를 골랐다고 믿고 근사값을 정확값으로 오인할 수 있는 실사용 버그다.
+2. **UI의 "정확" 옵션이 exact 엔진을 아예 호출하지 않는다.** `ui/src/App.tsx:176`은 `<option value="exact">정확</option>`을 제공하지만, `run()`(같은 파일 83-106행)은 항상 `wasm.run_dp_json`만 호출하고 `run_exact_json`은 import조차 되어 있지 않다. 버그 1과 겹쳐 웹 UI에서는 이 문제가 완전히 은폐되어 있다 — "정확"을 선택해도 티 나지 않는 ScaledF64 결과가 나온다.
+3. **`ExactResult`에 `clamp_events`가 없다** (절대 규칙 7 부분 위반). `engine_dp.rs`의 `DpResult`와 `engine_mc.rs`의 `McResult`는 둘 다 `model.prob_table.clamp_events`(nestingPolicy 충돌 해소 횟수, §4.4)를 결과에 실어 보내지만, `engine_exact.rs:39-48`의 `ExactResult`에는 해당 필드 자체가 없다. exact 모드에서 clamp 이벤트가 발생해도 사용자에게 보고되지 않고 조용히 버려진다.
+
+우선순위: 1·2번은 사실상 하나의 버그(exact 경로 미배선)이므로 함께 고친다 — `run_dp`가 `Exact`를 선택했을 때는 `run_exact`로 위임하거나 최소한 에러를 반환해야 하고, UI는 `run_exact_json`을 실제로 호출해야 한다. 3번은 `ExactResult`에 `clamp_events: u64` 필드를 추가하고 `run_exact`가 채우면 된다.

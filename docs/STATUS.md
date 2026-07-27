@@ -35,5 +35,13 @@
 - TypeScript strict 타입 검사: 통과
 - Vite 프로덕션 빌드: 통과
 - 모든 Rust 파일 tree-sitter 문법 검사: 통과
-- Rust `cargo test`: 현재 실행 환경에 Rust 툴체인이 없어 미실행
+- Rust `cargo build --workspace && cargo test --workspace` (2026-07-27): 빌드 성공, 테스트 7/7 통과. 경고 1건(`compile.rs:230` `EntityDef.name` 미사용)
+
+## 2026-07-27 감사 (설계문서 vs 코드 정합성)
+
+`docs/DESIGN.md`/`CLAUDE.md`를 저장소에 반영한 직후, 문서의 주장을 실제 코드와 전수 대조했다. 결과는 `docs/DESIGN.md` §13에 반영했다. 요약:
+
+- §13.1(스펙 차이), §13.2(미구현 진단) 표는 여전히 정확함을 확인 — 드리프트 없음
+- 신규 발견(§13.5, 문서에 없던 것): `numeric: "exact"` 선택 시 `dp` 경로가 조용히 `ScaledF64`로 강등되고 결과 라벨도 `"scaled"`로 잘못 표시되는 버그, UI "정확" 옵션이 exact 엔진을 호출하지 않는 버그, `ExactResult`에 `clamp_events` 누락(절대 규칙 7 부분 위반)
+- 코드 수정은 이번 라운드에 하지 않았다 — §13.5가 다음 작업 우선순위
 
