@@ -39,12 +39,14 @@ pub struct ExactCell {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExactResult {
+    pub numeric: String,
     pub trials: u32,
     pub tracked_leaf_ids: Vec<String>,
     pub joint: Vec<ExactCell>,
     pub denominator: String,
     pub elapsed_ms: u64,
     pub peak_states: usize,
+    pub clamp_events: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -135,11 +137,13 @@ pub fn run_exact(
     }).collect();
     joint.sort_by(|a, b| a.counts.cmp(&b.counts));
     Ok(ExactResult {
+        numeric: "exact".into(),
         trials: model.max_trials,
         tracked_leaf_ids: model.tracked_leaves.iter().map(|i| model.leaves[*i].id.clone()).collect(),
         joint,
         denominator: denominator_string,
         elapsed_ms: started.elapsed().as_millis() as u64,
         peak_states,
+        clamp_events: model.prob_table.clamp_events,
     })
 }
