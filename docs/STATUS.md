@@ -11,7 +11,7 @@
 - 엔티티 트리 → 배타적 리프 분할과 `__other__` 생성
 - 제어상태·시행별 정확 유리수 확률표 사전계산
 - 제어 전이, 확정 지급, 제어상태 기반 동적 확률
-- 재현 가능한 xoshiro256++ MC와 alias sampling, Wilson 95% 구간
+- 재현 가능한 병렬 xoshiro256++ MC와 alias sampling, Wilson 95% 구간
 - MC↔DP 10개 모델·희귀 비율 교차검증, exact↔ScaledF64 복합·극소확률 비교, 지급 의미론 4조합과 해석해 회귀 테스트
 - `consumesTrial` 논리 시행 슬롯을 MC·ScaledF64 DP·ExactInt DP에 동일하게 구현
 - 두 프리셋 SHA-256 골든과 결정적 IR 컴파일러/엔진 퍼징
@@ -28,7 +28,7 @@
 
 - 확률표 1천만 제어상태 초과 시 lazy cache
 - snapshot의 GCHS/zstd/checkpoint 직렬화
-- Rayon/Web Worker 병렬 MC와 자동 CI 폭 정지
+- Web Worker 병렬 MC와 자동 CI 폭 정지
 - E005 순환 참조 정적 분석 보강
 - Tauri 데스크톱 패키징
 - 10개 이상 게임 프리셋 및 골든 파일
@@ -118,3 +118,10 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - 지급량까지 포함한 카운트 상한으로 패킹 공간을 계산하고 `u64` 초과를 명시적으로 거부한다.
 - 로컬 `cargo test --workspace`: **35/35 통과**, 프리셋 골든 SHA-256 결과 불변.
 - release/기본 프루닝 실측(180 제어상태, N=1,000, 3개 리프): 픽업 단독 4,923ms, `pickup × star3__self` 결합 194,856ms. §6.6 목표(300ms/8s)는 아직 미달이며 Phase 3 병렬 전개와 후속 프로파일링이 필요하다.
+
+## 2026-07-28 M8 Phase 2 — MC 병렬화
+
+- native 기본 기능에 Rayon을 연결하고 4,096 run 고정 청크마다 xoshiro256++ `jump()`로 독립 스트림을 만든다.
+- 청크 번호와 RNG 스트림을 스레드 스케줄링에서 분리해 동일 시드 결과가 1/4 스레드에서 히스토그램·최초 달성 배열까지 완전히 일치한다.
+- 블루 아카이브 프리셋 MC 100만 회 release 실측: 1스레드 5,008ms, 4스레드 1,823ms(약 2.75배).
+- 로컬 `cargo test --workspace`: **36/36 통과**. 기존 경고 `EntityDef.name` 미사용 1건 외 신규 경고 없음.
