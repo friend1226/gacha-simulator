@@ -4,8 +4,9 @@ use num_bigint::BigInt;
 use num_integer::Integer;
 use num_rational::BigRational;
 use num_traits::{One, ToPrimitive, Zero};
+use rustc_hash::FxHashMap;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -97,7 +98,7 @@ pub fn run_exact(
     }).collect();
     let codec = StateCodec::new(&model.control_max, &model.state_count_max)?;
     let initial = codec.encode(&model.control_init, &vec![0; model.state_leaves.len()])?;
-    let mut cells = HashMap::from([(initial, BigInt::one())]);
+    let mut cells = FxHashMap::from_iter([(initial, BigInt::one())]);
     let mut denominator = BigInt::one();
     let mut peak_states = 1usize;
     let mut hit_pmf = model.condition.as_ref()
@@ -110,50 +111,17 @@ pub fn run_exact(
         if let Some(pmf) = &mut hit_pmf {
             for numerator in pmf { *numerator *= lcm; }
         }
-        let mut next: HashMap<u64, BigInt> = HashMap::new();
-        for (state, numerator) in cells {
-            let ci = codec.control_index(state);
-            let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
-            let (base_control, base_counts) = codec.decode(state);
-            let mut successor_control = base_control.clone();
-            let mut successor_counts = base_counts.clone();
-            for (leaf, weight) in weights[ci][ti].iter().enumerate() {
-                if weight.is_zero() { continue; }
-                let contribution = &numerator * weight;
-                successor_control.copy_from_slice(&base_control);
-                successor_counts.copy_from_slice(&base_counts);
-                if let Some(position) = model.state_leaves.iter().position(|tracked| *tracked == leaf) {
-                    successor_counts[position] += 1;
+        let source: Vec<_> = cells.into_iter().collect();
+        let partials = expand_exact_layer(model, &codec, &weights, &source, draw_trial);
+        let mut next: FxHashMap<u64, BigInt> = FxHashMap::default();
+        for partial in partials {
+            for (state, contribution) in partial.cells {
+                *next.entry(state).or_default() += contribution;
+            }
+            if let Some(pmf) = &mut hit_pmf {
+                for (hit_trial, contribution) in partial.hits {
+                    pmf[hit_trial] += contribution;
                 }
-                model.apply_transitions(&mut successor_control, leaf, draw_trial);
-                if model.condition_matches_sparse(&successor_counts, draw_trial) {
-                    if let Some(pmf) = &mut hit_pmf {
-                        pmf[draw_trial as usize] += contribution;
-                    }
-                    continue;
-                }
-                let mut grant_hit = None;
-                let applied_consumed = model.apply_triggers_sparse(
-                    &mut successor_control,
-                    &mut successor_counts,
-                    draw_trial,
-                    |grant_counts, grant_trial| {
-                        if grant_hit.is_none()
-                            && model.condition_matches_sparse(grant_counts, grant_trial)
-                        {
-                            grant_hit = Some(grant_trial);
-                        }
-                    },
-                );
-                debug_assert_eq!(applied_consumed, consumed_trials);
-                if let Some(hit_trial) = grant_hit {
-                    if let Some(pmf) = &mut hit_pmf {
-                        pmf[hit_trial as usize] += contribution;
-                    }
-                    continue;
-                }
-                let successor = codec.encode(&successor_control, &successor_counts)?;
-                *next.entry(successor).or_default() += contribution;
             }
         }
         denominator *= lcm;
@@ -186,7 +154,7 @@ pub fn run_exact(
         trial = next_trial;
         if !progress(trial, model.max_trials) { return Err(ExactError::Cancelled); }
     }
-    let mut marginalized: HashMap<Vec<u32>, BigInt> = HashMap::new();
+    let mut marginalized: BTreeMap<Vec<u32>, BigInt> = BTreeMap::new();
     for (state, numerator) in cells {
         let (_, state_counts) = codec.decode(state);
         let key = model.tracked_leaves.iter().map(|leaf| {
@@ -196,13 +164,12 @@ pub fn run_exact(
         *marginalized.entry(key).or_default() += numerator;
     }
     let denominator_string = denominator.to_string();
-    let mut joint: Vec<_> = marginalized.into_iter().map(|(counts, numerator)| ExactCell {
+    let joint = marginalized.into_iter().map(|(counts, numerator)| ExactCell {
         counts,
         probability: BigRational::new(numerator.clone(), denominator.clone()).to_f64().unwrap_or(0.0),
         numerator: numerator.to_string(),
         denominator: denominator_string.clone(),
     }).collect();
-    joint.sort_by(|a, b| a.counts.cmp(&b.counts));
     let first_hit = hit_pmf.map(|pmf| summarize_exact_first_hit(&pmf, &denominator));
     Ok(ExactResult {
         numeric: "exact".into(),
@@ -215,6 +182,93 @@ pub fn run_exact(
         peak_states,
         clamp_events: model.prob_table.clamp_events,
     })
+}
+
+struct ExactLayerExpansion {
+    cells: FxHashMap<u64, BigInt>,
+    hits: Vec<(usize, BigInt)>,
+}
+
+#[cfg(feature = "parallel")]
+fn expand_exact_layer(
+    model: &CompiledModel,
+    codec: &StateCodec,
+    weights: &[Vec<Vec<BigInt>>],
+    source: &[(u64, BigInt)],
+    draw_trial: u32,
+) -> Vec<ExactLayerExpansion> {
+    use rayon::prelude::*;
+    source.par_chunks(256)
+        .map(|chunk| expand_exact_chunk(model, codec, weights, chunk, draw_trial))
+        .collect()
+}
+
+#[cfg(not(feature = "parallel"))]
+fn expand_exact_layer(
+    model: &CompiledModel,
+    codec: &StateCodec,
+    weights: &[Vec<Vec<BigInt>>],
+    source: &[(u64, BigInt)],
+    draw_trial: u32,
+) -> Vec<ExactLayerExpansion> {
+    source.chunks(256)
+        .map(|chunk| expand_exact_chunk(model, codec, weights, chunk, draw_trial))
+        .collect()
+}
+
+fn expand_exact_chunk(
+    model: &CompiledModel,
+    codec: &StateCodec,
+    weights: &[Vec<Vec<BigInt>>],
+    source: &[(u64, BigInt)],
+    draw_trial: u32,
+) -> ExactLayerExpansion {
+    let consumed_trials = model.consumed_trials_after(draw_trial);
+    let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
+    let mut cells = FxHashMap::default();
+    let mut hits = Vec::new();
+    for (state, numerator) in source {
+            let ci = codec.control_index(*state);
+            let (base_control, base_counts) = codec.decode(*state);
+            let mut successor_control = base_control.clone();
+            let mut successor_counts = base_counts.clone();
+            for (leaf, weight) in weights[ci][ti].iter().enumerate() {
+                if weight.is_zero() { continue; }
+                let contribution = numerator * weight;
+                successor_control.copy_from_slice(&base_control);
+                successor_counts.copy_from_slice(&base_counts);
+                if let Some(position) = model.state_leaves.iter().position(|tracked| *tracked == leaf) {
+                    successor_counts[position] += 1;
+                }
+                model.apply_transitions(&mut successor_control, leaf, draw_trial);
+                if model.condition_matches_sparse(&successor_counts, draw_trial) {
+                    hits.push((draw_trial as usize, contribution));
+                    continue;
+                }
+                let mut grant_hit = None;
+                let applied_consumed = model.apply_triggers_sparse(
+                    &mut successor_control,
+                    &mut successor_counts,
+                    draw_trial,
+                    |grant_counts, grant_trial| {
+                        if grant_hit.is_none()
+                            && model.condition_matches_sparse(grant_counts, grant_trial)
+                        {
+                            grant_hit = Some(grant_trial);
+                        }
+                    },
+                );
+                debug_assert_eq!(applied_consumed, consumed_trials);
+                if let Some(hit_trial) = grant_hit {
+                    hits.push((hit_trial as usize, contribution));
+                    continue;
+                }
+                let successor = codec.encode(&successor_control, &successor_counts)
+                    .expect("compiled successor state must fit its codec");
+                *cells.entry(successor).or_default() += contribution;
+            }
+        }
+    ExactLayerExpansion { cells, hits }
 }
 
 fn exact_probability(numerator: BigInt, denominator: &BigInt) -> ExactProbability {
@@ -269,5 +323,48 @@ fn summarize_exact_first_hit(
         failure_reachable: exact_probability(failure, denominator),
         mean,
         percentiles,
+    }
+}
+
+#[cfg(all(test, feature = "parallel"))]
+mod tests {
+    use super::*;
+    use crate::{compile, ir::ModelIr};
+    use serde_json::json;
+
+    #[test]
+    fn exact_result_is_identical_across_thread_counts() {
+        let ir: ModelIr = serde_json::from_value(json!({
+            "irVersion": 1,
+            "name": "parallel exact determinism",
+            "entities": [
+                {"id": "hit", "name": "hit", "prob": {"lit": "1/3"}},
+                {"id": "bonus", "name": "bonus", "prob": {"lit": "1/5"}}
+            ],
+            "stateVars": [],
+            "probRules": [],
+            "transitions": [],
+            "triggers": [],
+            "run": {
+                "maxTrials": 12,
+                "trackJoint": ["hit", "bonus"],
+                "numeric": "exact",
+                "condition": {"ge": [{"var": "nHit"}, {"lit": "3"}]}
+            }
+        })).unwrap();
+        let model = compile(&ir).unwrap();
+        let run = |threads| {
+            rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap()
+                .install(|| run_exact(&model, ExactOptions::default(), |_, _| true).unwrap())
+        };
+        let mut one = run(1);
+        let mut four = run(4);
+        one.elapsed_ms = 0;
+        four.elapsed_ms = 0;
+
+        assert_eq!(
+            serde_json::to_vec(&one).unwrap(),
+            serde_json::to_vec(&four).unwrap(),
+        );
     }
 }

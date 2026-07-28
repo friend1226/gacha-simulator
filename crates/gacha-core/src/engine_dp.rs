@@ -3,8 +3,9 @@ use crate::engine_exact::{run_exact, ExactError, ExactOptions, ExactResult};
 use crate::ir::NumericBackend;
 use crate::numeric::{F64, Prob, ScaledF64};
 use crate::state::StateCodec;
+use rustc_hash::FxHashMap;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -93,7 +94,7 @@ fn run_generic<P: Prob>(
         .expect("compiler must reject state spaces that exceed u64");
     let initial = codec.encode(&model.control_init, &vec![0; model.state_leaves.len()])
         .expect("compiled initial state must fit its codec");
-    let mut layer = HashMap::from([(initial, P::one())]);
+    let mut layer = FxHashMap::from_iter([(initial, P::one())]);
     let mut hit_pmf = model.condition.as_ref().map(|_| vec![P::zero(); model.max_trials as usize + 1]);
     let mut pruned_mass = 0.0;
     let mut completed_trials = 0;
@@ -102,11 +103,104 @@ fn run_generic<P: Prob>(
         let draw_trial = trial + 1;
         let consumed_trials = model.consumed_trials_after(draw_trial);
         let next_trial = draw_trial + consumed_trials;
-        let mut next: HashMap<u64, P> = HashMap::new();
-        for (state, mass) in layer {
-            let ci = codec.control_index(state);
-            let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
-            let (base_control, base_counts) = codec.decode(state);
+        let source: Vec<_> = layer.into_iter().collect();
+        let partials = expand_layer(model, &codec, &converted, &source, draw_trial);
+        let mut next: FxHashMap<u64, P> = FxHashMap::default();
+        for partial in partials {
+            for (state, contribution) in partial.cells {
+                next.entry(state).or_insert_with(P::zero).add_assign(&contribution);
+            }
+            if let Some(pmf) = &mut hit_pmf {
+                for (hit_trial, contribution) in partial.hits {
+                    pmf[hit_trial].add_assign(&contribution);
+                }
+            }
+        }
+        if let Some(threshold) = options.prune_log10 {
+            next.retain(|_, p| {
+                let keep = p.magnitude_log10().map(|m| m >= threshold).unwrap_or(true);
+                if !keep { pruned_mass += p.to_f64_lossy(); }
+                keep
+            });
+        }
+        layer = next;
+        completed_trials = next_trial;
+        trial = next_trial;
+        if !progress(trial, model.max_trials) { break; }
+    }
+    let mut joint: BTreeMap<Vec<u32>, P> = BTreeMap::new();
+    for (state, probability) in layer {
+        let (_, state_counts) = codec.decode(state);
+        let key = model.tracked_leaves.iter().map(|leaf| {
+            model.state_leaves.iter().position(|state_leaf| state_leaf == leaf)
+                .map(|position| state_counts[position]).unwrap_or(0)
+        }).collect();
+        joint.entry(key).or_insert_with(P::zero).add_assign(&probability);
+    }
+    let cells = joint.into_iter().map(|(counts, probability)| DpCell {
+        counts,
+        probability: probability.to_f64_lossy(),
+        display: probability.to_decimal_string(12),
+    }).collect();
+    let first_hit = hit_pmf.map(|values| summarize_first_hit(&values));
+    DpResult {
+        numeric: backend.into(),
+        trials: completed_trials,
+        tracked_leaf_ids: model.tracked_leaves.iter().map(|i| model.leaves[*i].id.clone()).collect(),
+        joint: cells,
+        first_hit,
+        pruned_mass,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        clamp_events: model.prob_table.clamp_events,
+    }
+}
+
+struct LayerExpansion<P> {
+    cells: FxHashMap<u64, P>,
+    hits: Vec<(usize, P)>,
+}
+
+#[cfg(feature = "parallel")]
+fn expand_layer<P: Prob>(
+    model: &CompiledModel,
+    codec: &StateCodec,
+    converted: &[Vec<Vec<P>>],
+    source: &[(u64, P)],
+    draw_trial: u32,
+) -> Vec<LayerExpansion<P>> {
+    use rayon::prelude::*;
+    source.par_chunks(256)
+        .map(|chunk| expand_chunk(model, codec, converted, chunk, draw_trial))
+        .collect()
+}
+
+#[cfg(not(feature = "parallel"))]
+fn expand_layer<P: Prob>(
+    model: &CompiledModel,
+    codec: &StateCodec,
+    converted: &[Vec<Vec<P>>],
+    source: &[(u64, P)],
+    draw_trial: u32,
+) -> Vec<LayerExpansion<P>> {
+    source.chunks(256)
+        .map(|chunk| expand_chunk(model, codec, converted, chunk, draw_trial))
+        .collect()
+}
+
+fn expand_chunk<P: Prob>(
+    model: &CompiledModel,
+    codec: &StateCodec,
+    converted: &[Vec<Vec<P>>],
+    source: &[(u64, P)],
+    draw_trial: u32,
+) -> LayerExpansion<P> {
+    let consumed_trials = model.consumed_trials_after(draw_trial);
+    let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
+    let mut cells = FxHashMap::default();
+    let mut hits = Vec::new();
+    for (state, mass) in source {
+            let ci = codec.control_index(*state);
+            let (base_control, base_counts) = codec.decode(*state);
             let mut successor_control = base_control.clone();
             let mut successor_counts = base_counts.clone();
             for (leaf, p_leaf) in converted[ci][ti].iter().enumerate() {
@@ -119,7 +213,7 @@ fn run_generic<P: Prob>(
                 }
                 model.apply_transitions(&mut successor_control, leaf, draw_trial);
                 if model.condition_matches_sparse(&successor_counts, draw_trial) {
-                    if let Some(pmf) = &mut hit_pmf { pmf[draw_trial as usize].add_assign(&contribution); }
+                    hits.push((draw_trial as usize, contribution));
                     continue;
                 }
                 let mut grant_hit = None;
@@ -135,52 +229,15 @@ fn run_generic<P: Prob>(
                 );
                 debug_assert_eq!(applied_consumed, consumed_trials);
                 if let Some(hit_trial) = grant_hit {
-                    if let Some(pmf) = &mut hit_pmf { pmf[hit_trial as usize].add_assign(&contribution); }
+                    hits.push((hit_trial as usize, contribution));
                     continue;
                 }
                 let successor = codec.encode(&successor_control, &successor_counts)
                     .expect("compiled successor state must fit its codec");
-                next.entry(successor).or_insert_with(P::zero).add_assign(&contribution);
+                cells.entry(successor).or_insert_with(P::zero).add_assign(&contribution);
             }
         }
-        if let Some(threshold) = options.prune_log10 {
-            next.retain(|_, p| {
-                let keep = p.magnitude_log10().map(|m| m >= threshold).unwrap_or(true);
-                if !keep { pruned_mass += p.to_f64_lossy(); }
-                keep
-            });
-        }
-        layer = next;
-        completed_trials = next_trial;
-        trial = next_trial;
-        if !progress(trial, model.max_trials) { break; }
-    }
-    let mut joint: HashMap<Vec<u32>, P> = HashMap::new();
-    for (state, probability) in layer {
-        let (_, state_counts) = codec.decode(state);
-        let key = model.tracked_leaves.iter().map(|leaf| {
-            model.state_leaves.iter().position(|state_leaf| state_leaf == leaf)
-                .map(|position| state_counts[position]).unwrap_or(0)
-        }).collect();
-        joint.entry(key).or_insert_with(P::zero).add_assign(&probability);
-    }
-    let mut cells: Vec<_> = joint.into_iter().map(|(counts, probability)| DpCell {
-        counts,
-        probability: probability.to_f64_lossy(),
-        display: probability.to_decimal_string(12),
-    }).collect();
-    cells.sort_by(|a, b| a.counts.cmp(&b.counts));
-    let first_hit = hit_pmf.map(|values| summarize_first_hit(&values));
-    DpResult {
-        numeric: backend.into(),
-        trials: completed_trials,
-        tracked_leaf_ids: model.tracked_leaves.iter().map(|i| model.leaves[*i].id.clone()).collect(),
-        joint: cells,
-        first_hit,
-        pruned_mass,
-        elapsed_ms: started.elapsed().as_millis() as u64,
-        clamp_events: model.prob_table.clamp_events,
-    }
+    LayerExpansion { cells, hits }
 }
 
 fn summarize_first_hit<P: Prob>(pmf: &[P]) -> FirstHitResult {

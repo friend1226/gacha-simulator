@@ -19,6 +19,7 @@
 - 희소 DP, 추적 리프 축소, 프루닝 손실 보고, 최초 달성 PMF/CDF
 - ExactInt DP 최초 달성 흡수 상태와 공통분모 BigInt PMF/CDF
 - DP/Exact 공용 mixed-radix `u64` 상태 코덱
+- native MC·DP·ExactInt의 결정적 Rayon 병렬 전개
 - 정확 모드 시행/상태/메모리/분모 가드레일과 진행/취소 콜백
 - CLI 검증/DP/exact/MC 명령과 WASM JSON API
 - 블루 아카이브 및 하드 천장 프리셋
@@ -125,3 +126,11 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - 청크 번호와 RNG 스트림을 스레드 스케줄링에서 분리해 동일 시드 결과가 1/4 스레드에서 히스토그램·최초 달성 배열까지 완전히 일치한다.
 - 블루 아카이브 프리셋 MC 100만 회 release 실측: 1스레드 5,008ms, 4스레드 1,823ms(약 2.75배).
 - 로컬 `cargo test --workspace`: **36/36 통과**. 기존 경고 `EntityDef.name` 미사용 1건 외 신규 경고 없음.
+
+## 2026-07-28 M8 Phase 3 — DP 레이어 병렬 전개
+
+- ScaledF64/F64와 ExactInt 레이어를 256셀 고정 청크로 병렬 전개하고, 결정적 `FxHashMap` 로컬 레이어를 청크 순서대로 병합한다.
+- 프루닝·진행 콜백·ExactInt 레이어 약분과 질량 보존 단언은 병합 이후 단일 스레드 배리어에서 수행한다.
+- ExactInt 결과는 1/4 스레드에서 경과 시간을 제외한 JSON 바이트가 완전히 동일하며 프리셋 골든도 불변이다.
+- release/기본 프루닝 4스레드 실측(Phase 1과 동일 모델): 픽업 단독 2,107ms(1스레드 5,372ms), 결합 84,254ms. Phase 1 대비 약 2.3배 개선됐지만 §6.6 목표는 여전히 미달이다.
+- 로컬 `cargo test --workspace`: **37/37 통과**. 기존 경고 1건 외 신규 경고 없음.
