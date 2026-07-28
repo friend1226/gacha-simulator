@@ -178,3 +178,9 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - `gacha-tauri`를 워크스페이스에 추가한 뒤 GitHub Actions Rust CI(`ubuntu-latest`)가 `glib-sys`/`gobject-sys` 빌드 실패로 깨졌다. Tauri의 Linux 백엔드가 GTK/WebKit 시스템 라이브러리를 요구하는데 러너에 없기 때문이다.
 - 이번 라운드 Tauri 범위가 Windows 실행 파일까지였던 것과 일관되게, CI도 `cargo test --workspace --exclude gacha-tauri`로 해당 크레이트를 제외했다. Linux/macOS 패키징에 착수할 때 `apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev` 같은 사전 설치 단계를 추가하고 이 제외를 재검토해야 한다.
 - 로컬 재현: `cargo test --workspace --exclude gacha-tauri` 통과 확인.
+
+## 2026-07-29 preset_goldens CRLF/LF 불일치 수정
+
+- 위 수정 뒤에도 CI가 `preset_goldens` 두 테스트에서 실패했다. `resultSha256`(계산 결과)은 완전히 일치했고 `presetSha256`(프리셋 원본 파일 바이트 해시)만 달랐다 — 원인은 Windows `core.autocrlf=true`가 `presets/*.json`을 로컬 체크아웃 시 CRLF로 바꿔서, 그 상태로 생성된 골든 해시가 LF로 체크아웃되는 Linux CI와 어긋난 것이었다.
+- `.gitattributes`에 `presets/**/*.json text eol=lf`를 추가해 모든 환경에서 LF 체크아웃을 강제했다. git이 저장한 blob 자체는 이미 LF였으므로 `presets/*.json` 내용은 바뀌지 않았고, `presets/golden/*.json`의 `presetSha256` 필드만 LF 기준 값으로 갱신했다.
+- 로컬에서 LF로 재체크아웃한 뒤 재현한 해시가 CI 실패 로그의 `left`(실제 계산값)와 정확히 일치함을 확인하고 반영했다. `cargo test --workspace --exclude gacha-tauri` 전체 통과.
