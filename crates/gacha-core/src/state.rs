@@ -98,12 +98,25 @@ impl StateCodec {
     }
 
     pub fn replace_control_index(&self, state: u64, control_index: usize) -> u64 {
-        debug_assert!(control_index < self.control_states as usize);
+        debug_assert!(state < self.state_space, "packed state is outside the codec state space");
+        debug_assert!(
+            control_index < self.control_states as usize,
+            "control index is outside the codec control state space"
+        );
         state - state % self.control_states + control_index as u64
     }
 
     pub fn increment_count(&self, state: u64, position: usize) -> u64 {
-        state + self.strides[self.control_max.len() + position]
+        debug_assert!(state < self.state_space, "packed state is outside the codec state space");
+        debug_assert!(position < self.count_max.len(), "count position is outside the codec");
+        let maximum = self.count_max[position];
+        let stride = self.strides[self.control_max.len() + position];
+        let current = (state / stride) % (u64::from(maximum) + 1);
+        debug_assert!(
+            current < u64::from(maximum),
+            "count digit overflow would carry into the next packed field"
+        );
+        state + stride
     }
 
     pub fn control_len(&self) -> usize { self.control_max.len() }
@@ -143,5 +156,23 @@ mod tests {
                 maximum: 1,
             }),
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "count digit overflow")]
+    fn packed_count_increment_rejects_carry_into_the_next_field() {
+        let codec = StateCodec::new(&[1], &[2, 3]).unwrap();
+        let state = codec.encode(&[0], &[2, 1]).unwrap();
+
+        let _ = codec.increment_count(state, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "control index is outside")]
+    fn packed_control_replacement_rejects_out_of_range_index() {
+        let codec = StateCodec::new(&[1, 2], &[3]).unwrap();
+        let state = codec.encode(&[0, 0], &[1]).unwrap();
+
+        let _ = codec.replace_control_index(state, 6);
     }
 }

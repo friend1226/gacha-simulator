@@ -154,4 +154,12 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - release/4스레드 5회 중앙값(N=1,000, 제어 180상태): 픽업 단독 **3ms**(목표 <300ms), `pickup × star3__self` **178ms**(목표 <8s). 기존 2,107ms/84,254ms 대비 각각 약 702배/473배 개선됐다.
 - 위 정식 측정 모델은 선언된 제어상태와 무관하게 확률표가 동일하다. 확률이 실제 pity 상태에 의존하도록 만든 보수적 스트레스 변형의 3회 중앙값은 484ms/18,712ms로, 의미상 필요한 180상태를 제거할 수 없어 목표를 초과했다. 현재 목표 표와의 차이 및 후속 sharded-layer 필요성을 DESIGN §6.6에 함께 기록했다.
 - MC jump 스트림을 순차 사전계산해 스트림 준비 복잡도를 O(n²)에서 O(n)으로 낮췄고, snapshot clippy 경고 2건도 정리했다.
-- 로컬 `cargo test --workspace`: **42/42 통과**. 결정성 테스트와 프리셋 골든 파일 모두 불변이며 기존 `EntityDef.name` 경고 1건 외 신규 경고 없음.
+- `StateCodec`의 패킹 상태 고속 갱신 헬퍼에 디버그 범위 검증을 추가해 count 자릿수 carry와 잘못된 control 인덱스를 즉시 검출한다.
+- 하드-pity 스트레스 케이스는 PowerShell에서 `$env:RAYON_NUM_THREADS=4; cargo run --release -p gacha-core --example m8_hard_pity_bench`로 재현할 수 있다. 기본 3회 측정의 원시 표본·중앙값·목표 달성 여부를 JSON으로 출력한다.
+- 로컬 `cargo test --workspace`: **44/44 통과**. 결정성 테스트와 프리셋 골든 파일 모두 불변이며 기존 `EntityDef.name` 경고 1건 외 신규 경고 없음.
+
+## 2026-07-28 M8 종료
+
+이번 라운드로 M8을 마무리한다. 하드-pity 케이스의 §6.6 목표 미달(픽업 단독 1.6배,
+결합 2.3배)은 재현 벤치마크와 함께 유지하되, sharded layer 등 자료구조 변경이 필요한
+후속 성능 과제로 이관한다.
