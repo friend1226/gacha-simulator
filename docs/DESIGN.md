@@ -897,7 +897,6 @@ Blockly 워크스페이스 → **Model IR JSON 직렬화**. JS 코드 생성 경
 
 | 위치 | 스펙 | 현재 구현 | 처리 |
 |---|---|---|---|
-| §6.1 상태 인코딩 | mixed-radix `u64` 패킹 | `struct State { control: Vec<u32>, counts: Vec<u32> }` (`engine_dp.rs:19-22`, `engine_exact.rs:25-28`) | M8에서 패킹으로 교체. 전이마다 힙 할당 2회 + Vec 해시가 발생하므로 DP 성능의 주 병목 |
 | §8 스냅샷 | GCHS 포맷 + zstd + 체크포인트 | 미구현 (`snapshot`/`checkpoint`/`zstd` 관련 파일·심볼 없음) | M8 |
 | §5.2 병렬 | rayon / Web Worker | 단일 스레드. `parallel` feature flag는 선언만 있고 `#[cfg(feature = "parallel")]` 게이트가 코드에 전혀 없는 빈 스텁 | M8 |
 | §4.2 lazy 확률표 | 제어상태 10^7 초과 시 lazy 캐시 | `compile.rs:280-305`가 항상 즉시 사전계산. 10,000,000 초과 시 `W004` 경고(`compile.rs:282`)만 내고 그대로 계산 강행 | 한계 초과 모델이 나오면 착수 |
@@ -908,7 +907,7 @@ Blockly 워크스페이스 → **Model IR JSON 직렬화**. JS 코드 생성 경
 
 ### 13.3 테스트 격차 (최우선)
 
-현재 테스트 33개. §9의 우선 검증 1~7을 모두 구현했다.
+현재 테스트 35개. §9의 우선 검증 1~7을 모두 구현했다.
 
 | 우선순위 | 테스트 | 스펙 | 상태 |
 |---|---|---|---|

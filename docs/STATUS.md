@@ -18,6 +18,7 @@
 - GitHub Actions 기반 Rust/UI CI
 - 희소 DP, 추적 리프 축소, 프루닝 손실 보고, 최초 달성 PMF/CDF
 - ExactInt DP 최초 달성 흡수 상태와 공통분모 BigInt PMF/CDF
+- DP/Exact 공용 mixed-radix `u64` 상태 코덱
 - 정확 모드 시행/상태/메모리/분모 가드레일과 진행/취소 콜백
 - CLI 검증/DP/exact/MC 명령과 WASM JSON API
 - 블루 아카이브 및 하드 천장 프리셋
@@ -109,3 +110,11 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - W007 커밋을 체크아웃해 `cargo test --workspace` 27/27 재확인, 경고 판정 로직이 런타임 소모 판정과 일치함을 코드로 확인했다.
 - E002/W003/exact 흡수 커밋을 체크아웃해 `cargo test --workspace` 33/33 재확인, affine 상관항 소거·W003 심플렉스 분석·exact 흡수 질량보존 검사를 코드 레벨로 검증했다.
 - 코드 결함 없음. CLAUDE.md 고정 순서(§1~4)가 모두 완료됐고, 다음은 M8 성능 작업 또는 프리셋 확장 등 사용자 결정이 필요하다.
+
+## 2026-07-28 M8 Phase 1 — mixed-radix 상태 패킹
+
+- DP와 ExactInt에 중복돼 있던 `State { control, counts }`를 제거하고 공용 `StateCodec`과 `HashMap<u64, P>` 레이어로 교체했다.
+- 제어 차원을 하위 자릿수에 배치해 확률표 제어 인덱스를 나눗셈 한 번으로 구하며, 상태별 전이 버퍼를 재사용한다.
+- 지급량까지 포함한 카운트 상한으로 패킹 공간을 계산하고 `u64` 초과를 명시적으로 거부한다.
+- 로컬 `cargo test --workspace`: **35/35 통과**, 프리셋 골든 SHA-256 결과 불변.
+- release/기본 프루닝 실측(180 제어상태, N=1,000, 3개 리프): 픽업 단독 4,923ms, `pickup × star3__self` 결합 194,856ms. §6.6 목표(300ms/8s)는 아직 미달이며 Phase 3 병렬 전개와 후속 프로파일링이 필요하다.

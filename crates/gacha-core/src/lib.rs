@@ -7,6 +7,7 @@ pub mod ir;
 pub mod numeric;
 pub mod rational;
 pub mod report;
+pub mod state;
 
 pub use compile::{compile, CompiledModel, Diagnostic, Severity};
 pub use engine_dp::{run_dp, DpOptions, DpResult, DpRunResult};

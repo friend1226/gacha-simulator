@@ -1,4 +1,5 @@
 use crate::compile::CompiledModel;
+use crate::state::{StateCodec, StateCodecError};
 use num_bigint::BigInt;
 use num_integer::Integer;
 use num_rational::BigRational;
@@ -19,12 +20,6 @@ impl Default for ExactOptions {
     fn default() -> Self {
         Self { max_trials: 2_000, max_states: 200_000, max_memory_bytes: 2 * 1024 * 1024 * 1024, reduce_layers: false }
     }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-struct State {
-    control: Vec<u32>,
-    counts: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -80,6 +75,8 @@ pub enum ExactError {
     MemoryLimit { actual: u64, limit: u64 },
     #[error("execution cancelled")]
     Cancelled,
+    #[error("state encoding failed: {0}")]
+    StateEncoding(#[from] StateCodecError),
 }
 
 pub fn run_exact(
@@ -98,7 +95,8 @@ pub fn run_exact(
     let weights: Vec<Vec<Vec<BigInt>>> = model.prob_table.entries.iter().map(|by_trial| {
         by_trial.iter().map(|p| p.exact.iter().map(|r| r.numer() * (lcm / r.denom())).collect()).collect()
     }).collect();
-    let initial = State { control: model.control_init.clone(), counts: vec![0; model.state_leaves.len()] };
+    let codec = StateCodec::new(&model.control_max, &model.state_count_max)?;
+    let initial = codec.encode(&model.control_init, &vec![0; model.state_leaves.len()])?;
     let mut cells = HashMap::from([(initial, BigInt::one())]);
     let mut denominator = BigInt::one();
     let mut peak_states = 1usize;
@@ -112,19 +110,23 @@ pub fn run_exact(
         if let Some(pmf) = &mut hit_pmf {
             for numerator in pmf { *numerator *= lcm; }
         }
-        let mut next: HashMap<State, BigInt> = HashMap::new();
+        let mut next: HashMap<u64, BigInt> = HashMap::new();
         for (state, numerator) in cells {
-            let ci = model.control_index(&state.control);
+            let ci = codec.control_index(state);
             let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
+            let (base_control, base_counts) = codec.decode(state);
+            let mut successor_control = base_control.clone();
+            let mut successor_counts = base_counts.clone();
             for (leaf, weight) in weights[ci][ti].iter().enumerate() {
                 if weight.is_zero() { continue; }
                 let contribution = &numerator * weight;
-                let mut successor = state.clone();
+                successor_control.copy_from_slice(&base_control);
+                successor_counts.copy_from_slice(&base_counts);
                 if let Some(position) = model.state_leaves.iter().position(|tracked| *tracked == leaf) {
-                    successor.counts[position] += 1;
+                    successor_counts[position] += 1;
                 }
-                model.apply_transitions(&mut successor.control, leaf, draw_trial);
-                if model.condition_matches_sparse(&successor.counts, draw_trial) {
+                model.apply_transitions(&mut successor_control, leaf, draw_trial);
+                if model.condition_matches_sparse(&successor_counts, draw_trial) {
                     if let Some(pmf) = &mut hit_pmf {
                         pmf[draw_trial as usize] += contribution;
                     }
@@ -132,8 +134,8 @@ pub fn run_exact(
                 }
                 let mut grant_hit = None;
                 let applied_consumed = model.apply_triggers_sparse(
-                    &mut successor.control,
-                    &mut successor.counts,
+                    &mut successor_control,
+                    &mut successor_counts,
                     draw_trial,
                     |grant_counts, grant_trial| {
                         if grant_hit.is_none()
@@ -150,6 +152,7 @@ pub fn run_exact(
                     }
                     continue;
                 }
+                let successor = codec.encode(&successor_control, &successor_counts)?;
                 *next.entry(successor).or_default() += contribution;
             }
         }
@@ -185,9 +188,10 @@ pub fn run_exact(
     }
     let mut marginalized: HashMap<Vec<u32>, BigInt> = HashMap::new();
     for (state, numerator) in cells {
+        let (_, state_counts) = codec.decode(state);
         let key = model.tracked_leaves.iter().map(|leaf| {
             model.state_leaves.iter().position(|state_leaf| state_leaf == leaf)
-                .map(|position| state.counts[position]).unwrap_or(0)
+                .map(|position| state_counts[position]).unwrap_or(0)
         }).collect();
         *marginalized.entry(key).or_default() += numerator;
     }

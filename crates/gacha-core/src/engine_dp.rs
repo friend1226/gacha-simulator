@@ -2,9 +2,9 @@ use crate::compile::CompiledModel;
 use crate::engine_exact::{run_exact, ExactError, ExactOptions, ExactResult};
 use crate::ir::NumericBackend;
 use crate::numeric::{F64, Prob, ScaledF64};
+use crate::state::StateCodec;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -14,12 +14,6 @@ pub struct DpOptions {
 
 impl Default for DpOptions {
     fn default() -> Self { Self { prune_log10: Some(-18.0) } }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-struct State {
-    control: Vec<u32>,
-    counts: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,10 +89,10 @@ fn run_generic<P: Prob>(
     let converted: Vec<Vec<Vec<P>>> = model.prob_table.entries.iter().map(|by_trial| {
         by_trial.iter().map(|leaf_probs| leaf_probs.exact.iter().map(P::from_rational).collect()).collect()
     }).collect();
-    let initial = State {
-        control: model.control_init.clone(),
-        counts: vec![0; model.state_leaves.len()],
-    };
+    let codec = StateCodec::new(&model.control_max, &model.state_count_max)
+        .expect("compiler must reject state spaces that exceed u64");
+    let initial = codec.encode(&model.control_init, &vec![0; model.state_leaves.len()])
+        .expect("compiled initial state must fit its codec");
     let mut layer = HashMap::from([(initial, P::one())]);
     let mut hit_pmf = model.condition.as_ref().map(|_| vec![P::zero(); model.max_trials as usize + 1]);
     let mut pruned_mass = 0.0;
@@ -108,26 +102,30 @@ fn run_generic<P: Prob>(
         let draw_trial = trial + 1;
         let consumed_trials = model.consumed_trials_after(draw_trial);
         let next_trial = draw_trial + consumed_trials;
-        let mut next: HashMap<State, P> = HashMap::new();
+        let mut next: HashMap<u64, P> = HashMap::new();
         for (state, mass) in layer {
-            let ci = model.control_index(&state.control);
+            let ci = codec.control_index(state);
             let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
+            let (base_control, base_counts) = codec.decode(state);
+            let mut successor_control = base_control.clone();
+            let mut successor_counts = base_counts.clone();
             for (leaf, p_leaf) in converted[ci][ti].iter().enumerate() {
                 if p_leaf.is_zero() { continue; }
                 let contribution = mass.mul(p_leaf);
-                let mut successor = state.clone();
+                successor_control.copy_from_slice(&base_control);
+                successor_counts.copy_from_slice(&base_counts);
                 if let Some(position) = model.state_leaves.iter().position(|tracked| *tracked == leaf) {
-                    successor.counts[position] += 1;
+                    successor_counts[position] += 1;
                 }
-                model.apply_transitions(&mut successor.control, leaf, draw_trial);
-                if model.condition_matches_sparse(&successor.counts, draw_trial) {
+                model.apply_transitions(&mut successor_control, leaf, draw_trial);
+                if model.condition_matches_sparse(&successor_counts, draw_trial) {
                     if let Some(pmf) = &mut hit_pmf { pmf[draw_trial as usize].add_assign(&contribution); }
                     continue;
                 }
                 let mut grant_hit = None;
                 let applied_consumed = model.apply_triggers_sparse(
-                    &mut successor.control,
-                    &mut successor.counts,
+                    &mut successor_control,
+                    &mut successor_counts,
                     draw_trial,
                     |grant_counts, grant_trial| {
                         if grant_hit.is_none() && model.condition_matches_sparse(grant_counts, grant_trial) {
@@ -140,6 +138,8 @@ fn run_generic<P: Prob>(
                     if let Some(pmf) = &mut hit_pmf { pmf[hit_trial as usize].add_assign(&contribution); }
                     continue;
                 }
+                let successor = codec.encode(&successor_control, &successor_counts)
+                    .expect("compiled successor state must fit its codec");
                 next.entry(successor).or_insert_with(P::zero).add_assign(&contribution);
             }
         }
@@ -157,9 +157,10 @@ fn run_generic<P: Prob>(
     }
     let mut joint: HashMap<Vec<u32>, P> = HashMap::new();
     for (state, probability) in layer {
+        let (_, state_counts) = codec.decode(state);
         let key = model.tracked_leaves.iter().map(|leaf| {
             model.state_leaves.iter().position(|state_leaf| state_leaf == leaf)
-                .map(|position| state.counts[position]).unwrap_or(0)
+                .map(|position| state_counts[position]).unwrap_or(0)
         }).collect();
         joint.entry(key).or_insert_with(P::zero).add_assign(&probability);
     }

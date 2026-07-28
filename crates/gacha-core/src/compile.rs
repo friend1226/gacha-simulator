@@ -112,6 +112,7 @@ pub struct CompiledModel {
     pub control_max: Vec<u32>,
     pub tracked_leaves: Vec<usize>,
     pub state_leaves: Vec<usize>,
+    pub state_count_max: Vec<u32>,
     pub prob_table: ProbTable,
     pub transitions: Vec<CompiledTransition>,
     pub triggers: Vec<CompiledTrigger>,
@@ -389,6 +390,12 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         }
     }
     let state_leaves: Vec<_> = state_leaf_set.into_iter().collect();
+    let state_count_max: Vec<_> = state_leaves.iter().map(|leaf| {
+        triggers.iter()
+            .filter_map(|trigger| trigger.grant.as_ref())
+            .filter(|grant| grant.leaf == *leaf)
+            .fold(ir.run.max_trials, |maximum, grant| maximum.saturating_add(grant.amount))
+    }).collect();
     let condition = ir.run.condition.as_ref().and_then(|expr| match compile_expr(expr) {
         Ok(p) => Some(p),
         Err(e) => { diagnostics.push(error("E006", e.to_string(), None)); None }
@@ -420,11 +427,18 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     }
     if l_bits > 128 { exact_available = false; }
 
-    let stat_states = (ir.run.max_trials as u64 + 1)
-        .saturating_pow(state_leaves.len().saturating_sub(1) as u32);
+    let stat_states = state_count_max.iter()
+        .fold(1u64, |states, maximum| states.saturating_mul(u64::from(*maximum) + 1));
     let total_states = control_states.saturating_mul(stat_states);
-    let dp_available = control_states <= 10_000_000 && total_states <= 50_000_000;
-    let blockers = if dp_available { Vec::new() } else { vec!["estimated state space exceeds DP limit".into()] };
+    let state_encoding_available = crate::state::StateCodec::new(&control_max, &state_count_max).is_ok();
+    let dp_available = state_encoding_available && control_states <= 10_000_000 && total_states <= 50_000_000;
+    let blockers = if dp_available {
+        Vec::new()
+    } else if !state_encoding_available {
+        vec!["mixed-radix state space exceeds u64".into()]
+    } else {
+        vec!["estimated state space exceeds DP limit".into()]
+    };
     let analysis = MarkovAnalysis {
         dp_available,
         blockers,
@@ -444,6 +458,7 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         control_max,
         tracked_leaves,
         state_leaves,
+        state_count_max,
         prob_table: ProbTable { entries, trial_dependent, clamp_events },
         transitions,
         triggers,
