@@ -172,3 +172,9 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - 이번 범위는 `bundle.active=false`인 Windows 실행 파일까지다. 설치 프로그램, dmg/AppImage, 3플랫폼 자동 빌드, 프리셋 팩과 M10 사용자 문서는 후속으로 남긴다.
 - `cargo test --workspace`: **47/47 통과**, UI 테스트 **4/4 통과**, Vite 프로덕션 빌드 성공.
 - `npm run tauri:build:windows`: 성공. `target/release/gacha-tauri.exe` 생성 확인.
+
+## 2026-07-29 CI 수정 — gacha-tauri Linux 빌드 제외
+
+- `gacha-tauri`를 워크스페이스에 추가한 뒤 GitHub Actions Rust CI(`ubuntu-latest`)가 `glib-sys`/`gobject-sys` 빌드 실패로 깨졌다. Tauri의 Linux 백엔드가 GTK/WebKit 시스템 라이브러리를 요구하는데 러너에 없기 때문이다.
+- 이번 라운드 Tauri 범위가 Windows 실행 파일까지였던 것과 일관되게, CI도 `cargo test --workspace --exclude gacha-tauri`로 해당 크레이트를 제외했다. Linux/macOS 패키징에 착수할 때 `apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev` 같은 사전 설치 단계를 추가하고 이 제외를 재검토해야 한다.
+- 로컬 재현: `cargo test --workspace --exclude gacha-tauri` 통과 확인.
