@@ -66,21 +66,27 @@ impl StateCodec {
     }
 
     pub fn decode(&self, index: u64) -> (Vec<u32>, Vec<u32>) {
-        debug_assert!(index < self.state_space);
-        let mut remaining = index;
-        let mut control = Vec::with_capacity(self.control_max.len());
-        let mut counts = Vec::with_capacity(self.count_max.len());
-        for maximum in &self.control_max {
-            let modulus = u64::from(*maximum) + 1;
-            control.push((remaining % modulus) as u32);
-            remaining /= modulus;
-        }
-        for maximum in &self.count_max {
-            let modulus = u64::from(*maximum) + 1;
-            counts.push((remaining % modulus) as u32);
-            remaining /= modulus;
-        }
+        let mut control = vec![0; self.control_max.len()];
+        let mut counts = vec![0; self.count_max.len()];
+        self.decode_into(index, &mut control, &mut counts);
         (control, counts)
+    }
+
+    pub fn decode_into(&self, index: u64, control: &mut [u32], counts: &mut [u32]) {
+        debug_assert!(index < self.state_space);
+        assert_eq!(control.len(), self.control_max.len(), "control buffer length");
+        assert_eq!(counts.len(), self.count_max.len(), "count buffer length");
+        let mut remaining = index;
+        for (value, maximum) in control.iter_mut().zip(&self.control_max) {
+            let modulus = u64::from(*maximum) + 1;
+            *value = (remaining % modulus) as u32;
+            remaining /= modulus;
+        }
+        for (value, maximum) in counts.iter_mut().zip(&self.count_max) {
+            let modulus = u64::from(*maximum) + 1;
+            *value = (remaining % modulus) as u32;
+            remaining /= modulus;
+        }
     }
 
     pub fn control_index(&self, index: u64) -> usize {
@@ -90,6 +96,18 @@ impl StateCodec {
     pub fn state_space(&self) -> u64 {
         self.state_space
     }
+
+    pub fn replace_control_index(&self, state: u64, control_index: usize) -> u64 {
+        debug_assert!(control_index < self.control_states as usize);
+        state - state % self.control_states + control_index as u64
+    }
+
+    pub fn increment_count(&self, state: u64, position: usize) -> u64 {
+        state + self.strides[self.control_max.len() + position]
+    }
+
+    pub fn control_len(&self) -> usize { self.control_max.len() }
+    pub fn count_len(&self) -> usize { self.count_max.len() }
 }
 
 #[cfg(test)]
@@ -104,6 +122,11 @@ mod tests {
         assert_eq!(codec.decode(index), (vec![2, 1], vec![4, 6]));
         assert_eq!(codec.control_index(index), 5);
         assert_eq!(codec.state_space(), 3 * 4 * 6 * 8);
+
+        let replaced = codec.replace_control_index(index, 7);
+        assert_eq!(codec.decode(replaced), (vec![1, 2], vec![4, 6]));
+        let incremented = codec.increment_count(replaced, 0);
+        assert_eq!(codec.decode(incremented), (vec![1, 2], vec![5, 6]));
     }
 
     #[test]

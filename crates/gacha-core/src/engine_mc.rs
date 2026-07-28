@@ -95,11 +95,12 @@ pub fn run_mc(
     let mut first_hit = model.condition.as_ref().map(|_| vec![0u64; model.max_trials as usize + 1]);
     let chunks_per_batch = options.batch_size.max(1).div_ceil(STREAM_RUNS);
     let stream_count = options.runs.div_ceil(STREAM_RUNS);
+    let stream_rngs = build_stream_rngs(options.seed, stream_count);
     let mut completed = 0u64;
     let mut stream = 0u64;
     while stream < stream_count {
         let end_stream = (stream + chunks_per_batch).min(stream_count);
-        for chunk in run_streams(model, &tables, &options, stream, end_stream) {
+        for chunk in run_streams(model, &tables, &stream_rngs, &options, stream, end_stream) {
             completed += chunk.runs;
             for (key, occurrences) in chunk.histogram {
                 *histogram.entry(key).or_default() += occurrences;
@@ -140,13 +141,14 @@ struct ChunkResult {
 fn run_streams(
     model: &CompiledModel,
     tables: &[Vec<AliasTable>],
+    stream_rngs: &[Xoshiro256PlusPlus],
     options: &McOptions,
     start: u64,
     end: u64,
 ) -> Vec<ChunkResult> {
     use rayon::prelude::*;
     (start..end).into_par_iter()
-        .map(|stream| run_stream(model, tables, options, stream))
+        .map(|stream| run_stream(model, tables, stream_rngs[stream as usize].clone(), options, stream))
         .collect()
 }
 
@@ -154,23 +156,33 @@ fn run_streams(
 fn run_streams(
     model: &CompiledModel,
     tables: &[Vec<AliasTable>],
+    stream_rngs: &[Xoshiro256PlusPlus],
     options: &McOptions,
     start: u64,
     end: u64,
 ) -> Vec<ChunkResult> {
     (start..end)
-        .map(|stream| run_stream(model, tables, options, stream))
+        .map(|stream| run_stream(model, tables, stream_rngs[stream as usize].clone(), options, stream))
         .collect()
+}
+
+fn build_stream_rngs(seed: u64, stream_count: u64) -> Vec<Xoshiro256PlusPlus> {
+    let mut next = Xoshiro256PlusPlus::seed_from_u64(seed);
+    let mut streams = Vec::with_capacity(stream_count as usize);
+    for _ in 0..stream_count {
+        streams.push(next.clone());
+        next.jump();
+    }
+    streams
 }
 
 fn run_stream(
     model: &CompiledModel,
     tables: &[Vec<AliasTable>],
+    mut rng: Xoshiro256PlusPlus,
     options: &McOptions,
     stream: u64,
 ) -> ChunkResult {
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(options.seed);
-    for _ in 0..stream { rng.jump(); }
     let start = stream * STREAM_RUNS;
     let runs = (options.runs - start).min(STREAM_RUNS);
     let mut histogram = BTreeMap::new();

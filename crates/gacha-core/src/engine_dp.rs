@@ -188,16 +188,11 @@ fn run_generic_with_snapshot<P: Prob>(
         let consumed_trials = model.consumed_trials_after(draw_trial);
         let next_trial = draw_trial + consumed_trials;
         let source: Vec<_> = layer.into_iter().collect();
-        let partials = expand_layer(model, &codec, &converted, &source, draw_trial);
-        let mut next: FxHashMap<u64, P> = FxHashMap::default();
-        for partial in partials {
-            for (state, contribution) in partial.cells {
-                next.entry(state).or_insert_with(P::zero).add_assign(&contribution);
-            }
-            if let Some(pmf) = &mut hit_pmf {
-                for (hit_trial, contribution) in partial.hits {
-                    pmf[hit_trial].add_assign(&contribution);
-                }
+        let expanded = expand_layer(model, &codec, &converted, &source, draw_trial);
+        let mut next = expanded.cells;
+        if let Some(pmf) = &mut hit_pmf {
+            for (hit_trial, contribution) in expanded.hits {
+                pmf[hit_trial].add_assign(&contribution);
             }
         }
         if let Some(threshold) = options.prune_log10 {
@@ -255,11 +250,17 @@ fn expand_layer<P: Prob>(
     converted: &[Vec<Vec<P>>],
     source: &[(u64, P)],
     draw_trial: u32,
-) -> Vec<LayerExpansion<P>> {
-    use rayon::prelude::*;
-    source.par_chunks(256)
-        .map(|chunk| expand_chunk(model, codec, converted, chunk, draw_trial))
-        .collect()
+) -> LayerExpansion<P> {
+    if source.len() <= 1_024 {
+        return expand_chunk(model, codec, converted, source, draw_trial);
+    }
+    let middle = source.len() / 2;
+    let (left, right) = source.split_at(middle);
+    let (left, right) = rayon::join(
+        || expand_layer(model, codec, converted, left, draw_trial),
+        || expand_layer(model, codec, converted, right, draw_trial),
+    );
+    merge_expansions(left, right)
 }
 
 #[cfg(not(feature = "parallel"))]
@@ -269,10 +270,20 @@ fn expand_layer<P: Prob>(
     converted: &[Vec<Vec<P>>],
     source: &[(u64, P)],
     draw_trial: u32,
-) -> Vec<LayerExpansion<P>> {
-    source.chunks(256)
-        .map(|chunk| expand_chunk(model, codec, converted, chunk, draw_trial))
-        .collect()
+) -> LayerExpansion<P> {
+    expand_chunk(model, codec, converted, source, draw_trial)
+}
+
+fn merge_expansions<P: Prob>(
+    mut left: LayerExpansion<P>,
+    right: LayerExpansion<P>,
+) -> LayerExpansion<P> {
+    left.cells.reserve(right.cells.len());
+    for (state, contribution) in right.cells {
+        left.cells.entry(state).or_insert_with(P::zero).add_assign(&contribution);
+    }
+    left.hits.extend(right.hits);
+    left
 }
 
 fn expand_chunk<P: Prob>(
@@ -282,24 +293,36 @@ fn expand_chunk<P: Prob>(
     source: &[(u64, P)],
     draw_trial: u32,
 ) -> LayerExpansion<P> {
+    if model.packed_transition_fast_path() {
+        return expand_packed_chunk(model, codec, converted, source, draw_trial);
+    }
     let consumed_trials = model.consumed_trials_after(draw_trial);
     let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
     let mut cells = FxHashMap::default();
+    cells.reserve(source.len().saturating_mul(2));
     let mut hits = Vec::new();
+    let mut base_control = vec![0; codec.control_len()];
+    let mut base_counts = vec![0; codec.count_len()];
+    let mut successor_control = vec![0; codec.control_len()];
+    let mut successor_counts = vec![0; codec.count_len()];
+    let mut transition_before = vec![0; codec.control_len()];
     for (state, mass) in source {
             let ci = codec.control_index(*state);
-            let (base_control, base_counts) = codec.decode(*state);
-            let mut successor_control = base_control.clone();
-            let mut successor_counts = base_counts.clone();
+            codec.decode_into(*state, &mut base_control, &mut base_counts);
             for (leaf, p_leaf) in converted[ci][ti].iter().enumerate() {
                 if p_leaf.is_zero() { continue; }
                 let contribution = mass.mul(p_leaf);
                 successor_control.copy_from_slice(&base_control);
                 successor_counts.copy_from_slice(&base_counts);
-                if let Some(position) = model.state_leaves.iter().position(|tracked| *tracked == leaf) {
+                if let Some(position) = model.state_leaf_position(leaf) {
                     successor_counts[position] += 1;
                 }
-                model.apply_transitions(&mut successor_control, leaf, draw_trial);
+                model.apply_transitions_buffered(
+                    &mut successor_control,
+                    &mut transition_before,
+                    leaf,
+                    draw_trial,
+                );
                 if model.condition_matches_sparse(&successor_counts, draw_trial) {
                     hits.push((draw_trial as usize, contribution));
                     continue;
@@ -326,6 +349,40 @@ fn expand_chunk<P: Prob>(
             }
         }
     LayerExpansion { cells, hits }
+}
+
+fn expand_packed_chunk<P: Prob>(
+    model: &CompiledModel,
+    codec: &StateCodec,
+    converted: &[Vec<Vec<P>>],
+    source: &[(u64, P)],
+    draw_trial: u32,
+) -> LayerExpansion<P> {
+    let probability_trial = if model.prob_table.trial_dependent {
+        draw_trial as usize - 1
+    } else {
+        0
+    };
+    let mut cells = FxHashMap::default();
+    cells.reserve(source.len().saturating_mul(2));
+    for (state, mass) in source {
+        let control_index = codec.control_index(*state);
+        for (leaf, probability) in converted[control_index][probability_trial].iter().enumerate() {
+            if probability.is_zero() { continue; }
+            let next_control = if model.prob_table.control_invariant {
+                0
+            } else {
+                model.transition_control_index(control_index, leaf, draw_trial)
+            };
+            let mut successor = codec.replace_control_index(*state, next_control);
+            if let Some(position) = model.state_leaf_position(leaf) {
+                successor = codec.increment_count(successor, position);
+            }
+            let contribution = mass.mul(probability);
+            cells.entry(successor).or_insert_with(P::zero).add_assign(&contribution);
+        }
+    }
+    LayerExpansion { cells, hits: Vec::new() }
 }
 
 fn summarize_first_hit<P: Prob>(pmf: &[P]) -> FirstHitResult {
@@ -495,6 +552,40 @@ mod tests {
         let total: f64 = result.joint.iter().map(|c| c.probability).sum();
         assert!((total - 1.0).abs() < 1e-12);
         assert!((result.joint[5].probability - 252.0 / 1024.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn control_invariant_probability_table_collapses_unused_control_state() {
+        let baseline = bernoulli_ir("baseline", "1/3", 20);
+        let with_unused_control: ModelIr = serde_json::from_value(json!({
+            "irVersion": 1,
+            "name": "unused control",
+            "entities": [{"id": "hit", "name": "hit", "prob": {"lit": "1/3"}}],
+            "stateVars": [{"id": "pity", "init": 0, "max": 179, "role": "control"}],
+            "probRules": [],
+            "transitions": [
+                {"when": {"leafOf": "hit"}, "set": {"pity": {"lit": "0"}}},
+                {"when": {"not": {"leafOf": "hit"}}, "set": {
+                    "pity": {"add": [{"var": "pity"}, {"lit": "1"}]}
+                }}
+            ],
+            "triggers": [],
+            "run": {"maxTrials": 20, "trackJoint": ["hit"], "numeric": "scaled"}
+        })).unwrap();
+        let baseline = compile(&baseline).unwrap();
+        let optimized = compile(&with_unused_control).unwrap();
+        assert!(optimized.prob_table.control_invariant);
+
+        let baseline = run_generic::<ScaledF64>(
+            &baseline, DpOptions { prune_log10: None }, |_, _| true, "scaled",
+        );
+        let optimized = run_generic::<ScaledF64>(
+            &optimized, DpOptions { prune_log10: None }, |_, _| true, "scaled",
+        );
+        assert_eq!(
+            baseline.joint.iter().map(|cell| (&cell.counts, &cell.display)).collect::<Vec<_>>(),
+            optimized.joint.iter().map(|cell| (&cell.counts, &cell.display)).collect::<Vec<_>>(),
+        );
     }
 
     #[test]

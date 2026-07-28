@@ -203,7 +203,7 @@ fn stores_layer(policy: SnapshotPolicy, layer: u32, pinned: &BTreeSet<u32>) -> b
 fn is_log_checkpoint(layer: u32) -> bool {
     if layer == 0 { return true; }
     let mut normalized = layer;
-    while normalized % 10 == 0 { normalized /= 10; }
+    while normalized.is_multiple_of(10) { normalized /= 10; }
     matches!(normalized, 1 | 2 | 5)
 }
 
@@ -218,9 +218,8 @@ fn estimate_bytes(model: &CompiledModel, policy: SnapshotPolicy, pinned: &BTreeS
         SnapshotPolicy::Aggregate => (model.state_count_max.len() as u64)
             .saturating_mul(2_560)
             .max(128),
-        SnapshotPolicy::Checkpoint | SnapshotPolicy::Full => model.analysis.est_bytes_per_layer
-            .min(4 * 1024 * 1024)
-            .max(128),
+        SnapshotPolicy::Checkpoint | SnapshotPolicy::Full =>
+            model.analysis.est_bytes_per_layer.clamp(128, 4 * 1024 * 1024),
     };
     layers.saturating_mul(per_layer)
 }

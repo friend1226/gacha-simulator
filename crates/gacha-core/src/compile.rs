@@ -47,7 +47,14 @@ pub struct LeafProbs {
 pub struct ProbTable {
     pub entries: Vec<Vec<LeafProbs>>,
     pub trial_dependent: bool,
+    pub control_invariant: bool,
     pub clamp_events: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TransitionTable {
+    pub entries: Vec<Vec<Vec<usize>>>,
+    pub trial_dependent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -113,8 +120,10 @@ pub struct CompiledModel {
     pub control_max: Vec<u32>,
     pub tracked_leaves: Vec<usize>,
     pub state_leaves: Vec<usize>,
+    pub state_leaf_positions: Vec<Option<usize>>,
     pub state_count_max: Vec<u32>,
     pub prob_table: ProbTable,
+    pub transition_table: TransitionTable,
     pub transitions: Vec<CompiledTransition>,
     pub triggers: Vec<CompiledTrigger>,
     pub condition: Option<Program>,
@@ -143,19 +152,52 @@ impl CompiledModel {
 
     pub fn apply_transitions(&self, control: &mut [u32], leaf: usize, trial: u32) {
         let before = control.to_vec();
-        for transition in &self.transitions {
-            if !transition.predicate.matches(leaf) { continue; }
-            for (index, program) in &transition.assignments {
-                if let Ok(value) = eval(program, |name| {
-                    self.control_ids.iter().position(|id| id == name)
-                        .map(|i| Rational::from_integer(before[i].into()))
-                }, trial).and_then(|v| v.number()) {
-                    let next = value.to_integer().to_i64().unwrap_or(i64::MAX)
-                        .clamp(0, self.control_max[*index] as i64);
-                    control[*index] = next as u32;
-                }
-            }
-        }
+        apply_compiled_transitions(
+            &self.transitions,
+            &self.control_ids,
+            &self.control_max,
+            control,
+            &before,
+            leaf,
+            trial,
+        );
+    }
+
+    pub fn transition_control_index(&self, control_index: usize, leaf: usize, trial: u32) -> usize {
+        if self.transition_table.entries.is_empty() { return control_index; }
+        let ti = if self.transition_table.trial_dependent {
+            trial.saturating_sub(1) as usize
+        } else {
+            0
+        };
+        self.transition_table.entries[control_index][ti][leaf]
+    }
+
+    pub fn apply_transitions_buffered(
+        &self,
+        control: &mut [u32],
+        before: &mut [u32],
+        leaf: usize,
+        trial: u32,
+    ) {
+        before.copy_from_slice(control);
+        apply_compiled_transitions(
+            &self.transitions,
+            &self.control_ids,
+            &self.control_max,
+            control,
+            before,
+            leaf,
+            trial,
+        );
+    }
+
+    pub fn packed_transition_fast_path(&self) -> bool {
+        self.triggers.is_empty() && self.condition.is_none()
+    }
+
+    pub fn state_leaf_position(&self, leaf: usize) -> Option<usize> {
+        self.state_leaf_positions[leaf]
     }
 
     pub fn consumed_trials_after(&self, trial: u32) -> u32 {
@@ -279,6 +321,30 @@ impl CompiledModel {
     }
 }
 
+fn apply_compiled_transitions(
+    transitions: &[CompiledTransition],
+    control_ids: &[String],
+    control_max: &[u32],
+    control: &mut [u32],
+    before: &[u32],
+    leaf: usize,
+    trial: u32,
+) {
+    for transition in transitions {
+        if !transition.predicate.matches(leaf) { continue; }
+        for (index, program) in &transition.assignments {
+            if let Ok(value) = eval(program, |name| {
+                control_ids.iter().position(|id| id == name)
+                    .map(|i| Rational::from_integer(before[i].into()))
+            }, trial).and_then(|v| v.number()) {
+                let next = value.to_integer().to_i64().unwrap_or(i64::MAX)
+                    .clamp(0, control_max[*index] as i64);
+                control[*index] = next as u32;
+            }
+        }
+    }
+}
+
 struct EntityDef {
     id: String,
     name: String,
@@ -372,9 +438,49 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         return Err(CompileError { diagnostics });
     }
     diagnostics.push(info("W002", "the implicit __other__ leaf completes total probability to 1", None));
+    let control_invariant = entries.first().is_none_or(|first| {
+        entries.iter().skip(1).all(|candidate| {
+            candidate.len() == first.len()
+                && candidate.iter().zip(first).all(|(left, right)| left.exact == right.exact)
+        })
+    });
 
     let leaf_lookup: HashMap<_, _> = leaves.iter().enumerate().map(|(i, l)| (l.id.as_str(), i)).collect();
     let transitions = compile_transitions(&ir.transitions, &leaves, &control_ids, &mut diagnostics);
+    let transition_trial_dependent = transitions.iter()
+        .flat_map(|transition| &transition.assignments)
+        .any(|(_, program)| program.trial_dependent);
+    let transition_trials = if transition_trial_dependent { ir.run.max_trials.max(1) } else { 1 };
+    let mut transition_entries = Vec::new();
+    if !transitions.is_empty() && !control_invariant {
+        transition_entries.reserve(control_states as usize);
+        for ci in 0..control_states {
+            let control = decode_control(ci, &control_max);
+            let mut by_trial = Vec::with_capacity(transition_trials as usize);
+            for trial in 1..=transition_trials {
+                let mut by_leaf = Vec::with_capacity(leaves.len());
+                for leaf in 0..leaves.len() {
+                    let mut next = control.clone();
+                    apply_compiled_transitions(
+                        &transitions,
+                        &control_ids,
+                        &control_max,
+                        &mut next,
+                        &control,
+                        leaf,
+                        trial,
+                    );
+                    by_leaf.push(encode_control(&next, &control_max));
+                }
+                by_trial.push(by_leaf);
+            }
+            transition_entries.push(by_trial);
+        }
+    }
+    let transition_table = TransitionTable {
+        entries: transition_entries,
+        trial_dependent: transition_trial_dependent,
+    };
     let triggers = compile_triggers(&ir.triggers, &leaves, &leaf_lookup, &control_ids, &mut diagnostics);
     warn_unapplied_consuming_grants(&ir.triggers, ir.run.max_trials, &mut diagnostics);
     let tracked_leaves = expand_tracked(&ir.run.track_joint, &leaves, &mut diagnostics);
@@ -392,6 +498,10 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         }
     }
     let state_leaves: Vec<_> = state_leaf_set.into_iter().collect();
+    let mut state_leaf_positions = vec![None; leaves.len()];
+    for (position, leaf) in state_leaves.iter().enumerate() {
+        state_leaf_positions[*leaf] = Some(position);
+    }
     let state_count_max: Vec<_> = state_leaves.iter().map(|leaf| {
         triggers.iter()
             .filter_map(|trigger| trigger.grant.as_ref())
@@ -463,8 +573,10 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         control_max,
         tracked_leaves,
         state_leaves,
+        state_leaf_positions,
         state_count_max,
-        prob_table: ProbTable { entries, trial_dependent, clamp_events },
+        prob_table: ProbTable { entries, trial_dependent, control_invariant, clamp_events },
+        transition_table,
         transitions,
         triggers,
         condition,
@@ -1015,6 +1127,16 @@ fn decode_control(mut index: u64, maxes: &[u32]) -> Vec<u32> {
         index /= radix;
         value
     }).collect()
+}
+
+fn encode_control(values: &[u32], maxes: &[u32]) -> usize {
+    let mut index = 0usize;
+    let mut stride = 1usize;
+    for (value, maximum) in values.iter().zip(maxes) {
+        index += *value as usize * stride;
+        stride *= *maximum as usize + 1;
+    }
+    index
 }
 
 fn compile_transitions(

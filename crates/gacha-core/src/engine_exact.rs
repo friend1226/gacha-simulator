@@ -139,16 +139,11 @@ fn run_exact_internal(
             for numerator in pmf { *numerator *= lcm; }
         }
         let source: Vec<_> = cells.into_iter().collect();
-        let partials = expand_exact_layer(model, &codec, &weights, &source, draw_trial);
-        let mut next: FxHashMap<u64, BigInt> = FxHashMap::default();
-        for partial in partials {
-            for (state, contribution) in partial.cells {
-                *next.entry(state).or_default() += contribution;
-            }
-            if let Some(pmf) = &mut hit_pmf {
-                for (hit_trial, contribution) in partial.hits {
-                    pmf[hit_trial] += contribution;
-                }
+        let expanded = expand_exact_layer(model, &codec, &weights, &source, draw_trial);
+        let mut next = expanded.cells;
+        if let Some(pmf) = &mut hit_pmf {
+            for (hit_trial, contribution) in expanded.hits {
+                pmf[hit_trial] += contribution;
             }
         }
         denominator *= lcm;
@@ -227,11 +222,17 @@ fn expand_exact_layer(
     weights: &[Vec<Vec<BigInt>>],
     source: &[(u64, BigInt)],
     draw_trial: u32,
-) -> Vec<ExactLayerExpansion> {
-    use rayon::prelude::*;
-    source.par_chunks(256)
-        .map(|chunk| expand_exact_chunk(model, codec, weights, chunk, draw_trial))
-        .collect()
+) -> ExactLayerExpansion {
+    if source.len() <= 1_024 {
+        return expand_exact_chunk(model, codec, weights, source, draw_trial);
+    }
+    let middle = source.len() / 2;
+    let (left, right) = source.split_at(middle);
+    let (left, right) = rayon::join(
+        || expand_exact_layer(model, codec, weights, left, draw_trial),
+        || expand_exact_layer(model, codec, weights, right, draw_trial),
+    );
+    merge_exact_expansions(left, right)
 }
 
 #[cfg(not(feature = "parallel"))]
@@ -241,10 +242,20 @@ fn expand_exact_layer(
     weights: &[Vec<Vec<BigInt>>],
     source: &[(u64, BigInt)],
     draw_trial: u32,
-) -> Vec<ExactLayerExpansion> {
-    source.chunks(256)
-        .map(|chunk| expand_exact_chunk(model, codec, weights, chunk, draw_trial))
-        .collect()
+) -> ExactLayerExpansion {
+    expand_exact_chunk(model, codec, weights, source, draw_trial)
+}
+
+fn merge_exact_expansions(
+    mut left: ExactLayerExpansion,
+    right: ExactLayerExpansion,
+) -> ExactLayerExpansion {
+    left.cells.reserve(right.cells.len());
+    for (state, contribution) in right.cells {
+        *left.cells.entry(state).or_default() += contribution;
+    }
+    left.hits.extend(right.hits);
+    left
 }
 
 fn expand_exact_chunk(
@@ -254,24 +265,36 @@ fn expand_exact_chunk(
     source: &[(u64, BigInt)],
     draw_trial: u32,
 ) -> ExactLayerExpansion {
+    if model.packed_transition_fast_path() {
+        return expand_exact_packed_chunk(model, codec, weights, source, draw_trial);
+    }
     let consumed_trials = model.consumed_trials_after(draw_trial);
     let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
     let mut cells = FxHashMap::default();
+    cells.reserve(source.len().saturating_mul(2));
     let mut hits = Vec::new();
+    let mut base_control = vec![0; codec.control_len()];
+    let mut base_counts = vec![0; codec.count_len()];
+    let mut successor_control = vec![0; codec.control_len()];
+    let mut successor_counts = vec![0; codec.count_len()];
+    let mut transition_before = vec![0; codec.control_len()];
     for (state, numerator) in source {
             let ci = codec.control_index(*state);
-            let (base_control, base_counts) = codec.decode(*state);
-            let mut successor_control = base_control.clone();
-            let mut successor_counts = base_counts.clone();
+            codec.decode_into(*state, &mut base_control, &mut base_counts);
             for (leaf, weight) in weights[ci][ti].iter().enumerate() {
                 if weight.is_zero() { continue; }
                 let contribution = numerator * weight;
                 successor_control.copy_from_slice(&base_control);
                 successor_counts.copy_from_slice(&base_counts);
-                if let Some(position) = model.state_leaves.iter().position(|tracked| *tracked == leaf) {
+                if let Some(position) = model.state_leaf_position(leaf) {
                     successor_counts[position] += 1;
                 }
-                model.apply_transitions(&mut successor_control, leaf, draw_trial);
+                model.apply_transitions_buffered(
+                    &mut successor_control,
+                    &mut transition_before,
+                    leaf,
+                    draw_trial,
+                );
                 if model.condition_matches_sparse(&successor_counts, draw_trial) {
                     hits.push((draw_trial as usize, contribution));
                     continue;
@@ -300,6 +323,39 @@ fn expand_exact_chunk(
             }
         }
     ExactLayerExpansion { cells, hits }
+}
+
+fn expand_exact_packed_chunk(
+    model: &CompiledModel,
+    codec: &StateCodec,
+    weights: &[Vec<Vec<BigInt>>],
+    source: &[(u64, BigInt)],
+    draw_trial: u32,
+) -> ExactLayerExpansion {
+    let probability_trial = if model.prob_table.trial_dependent {
+        draw_trial as usize - 1
+    } else {
+        0
+    };
+    let mut cells = FxHashMap::default();
+    cells.reserve(source.len().saturating_mul(2));
+    for (state, numerator) in source {
+        let control_index = codec.control_index(*state);
+        for (leaf, weight) in weights[control_index][probability_trial].iter().enumerate() {
+            if weight.is_zero() { continue; }
+            let next_control = if model.prob_table.control_invariant {
+                0
+            } else {
+                model.transition_control_index(control_index, leaf, draw_trial)
+            };
+            let mut successor = codec.replace_control_index(*state, next_control);
+            if let Some(position) = model.state_leaf_position(leaf) {
+                successor = codec.increment_count(successor, position);
+            }
+            *cells.entry(successor).or_default() += numerator * weight;
+        }
+    }
+    ExactLayerExpansion { cells, hits: Vec::new() }
 }
 
 fn exact_probability(numerator: BigInt, denominator: &BigInt) -> ExactProbability {
