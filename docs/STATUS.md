@@ -184,3 +184,32 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - 위 수정 뒤에도 CI가 `preset_goldens` 두 테스트에서 실패했다. `resultSha256`(계산 결과)은 완전히 일치했고 `presetSha256`(프리셋 원본 파일 바이트 해시)만 달랐다 — 원인은 Windows `core.autocrlf=true`가 `presets/*.json`을 로컬 체크아웃 시 CRLF로 바꿔서, 그 상태로 생성된 골든 해시가 LF로 체크아웃되는 Linux CI와 어긋난 것이었다.
 - `.gitattributes`에 `presets/**/*.json text eol=lf`를 추가해 모든 환경에서 LF 체크아웃을 강제했다. git이 저장한 blob 자체는 이미 LF였으므로 `presets/*.json` 내용은 바뀌지 않았고, `presets/golden/*.json`의 `presetSha256` 필드만 LF 기준 값으로 갱신했다.
 - 로컬에서 LF로 재체크아웃한 뒤 재현한 해시가 CI 실패 로그의 `left`(실제 계산값)와 정확히 일치함을 확인하고 반영했다. `cargo test --workspace --exclude gacha-tauri` 전체 통과.
+
+## 2026-07-29 웹(WASM) 실행 경로 크래시 수정 — `Instant::now()`
+
+사용 문서를 작성하려고 실제 브라우저에서 웹 UI를 처음부터 끝까지 구동해보다가 발견했다.
+지금까지 Rust 테스트는 전부 네이티브로만 돌았고 UI 테스트는 wasm 호출을 mock 처리하고
+있어서, 컴파일된 `.wasm` 바이너리를 실제 브라우저 JS 엔진에서 실행해본 적이 이번이
+처음이었다.
+
+- **증상**: `validate_model`(컴파일만)은 정상 동작하지만 `run_dp_json`/`run_exact_json`/`run_mc_json`은
+  가장 단순한 모델(상태 없는 동전 던지기)로도 예외 없이 `RuntimeError: unreachable`로 크래시했다.
+  즉 웹 UI에서 "DP 실행"/"MC 실행" 버튼은 지금까지 한 번도 정상 동작한 적이 없었을 가능성이 높다.
+- **원인**: `engine_dp.rs`/`engine_exact.rs`/`engine_mc.rs`가 실행 시작 시점에 공통으로
+  `std::time::Instant::now()`를 호출하는데(경과 시간 계산용), `wasm32-unknown-unknown` 타겟에는
+  표준 시계 소스가 없어 이 호출이 트랩을 일으킨다. M8 이전부터 있던 코드라 이번 라운드의
+  회귀는 아니다.
+- **수정**: `[target.'cfg(target_arch = "wasm32")'.dependencies]`에 `web-time`을 추가하고,
+  세 엔진 파일에서 wasm32 타겟일 때만 `web_time::Instant`를 쓰도록 조건부 임포트했다
+  (네이티브/Tauri 경로는 그대로 `std::time::Instant`).
+- **검증**: `wasm-pack build` 재빌드 후 실제 브라우저(`npm run preview`와 `npm run dev` 양쪽)에서
+  블루 아카이브 프리셋으로 DP·MC를 직접 클릭해 실행했다. DP 484개 셀, MC 119개 셀이 정상
+  반환되고 MC의 Wilson 95% 구간이 DP 값을 포함함을 확인했다.
+- 별개로 `npm run dev`에서 wasm 모듈을 `ui/src/`로 옮겨 import하려는 시도는 Vite 프로덕션
+  빌드가 `public/`이 아닌 `@vite-ignore`된 동적 import 대상을 `dist/`에 복사하지 않는 문제를
+  일으켜 되돌렸다 — `public/wasm` 배치는 그대로 유지한다. `npm run dev`에서 계산 버튼을
+  누르면 Vite 개발 서버가 `public/` 자산의 동적 import를 거부하는 별도의 알려진 제약이
+  여전히 남아 있다(§Vite 공식 문서: public 자산은 소스 코드에서 import할 수 없음). 이 경로를
+  테스트하려면 `npm run build && npm run preview`를 사용해야 한다 — README/사용 문서에 반영.
+- `cargo test --workspace --exclude gacha-tauri` 전체 통과, `ui` `npx tsc --noEmit`/`npm test`
+  4/4 통과, `npm run build` 후 `dist/wasm/` 정상 생성 확인.

@@ -7,6 +7,9 @@ use num_traits::{One, ToPrimitive, Zero};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use std::collections::BTreeMap;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::snapshot::SnapshotSession;
