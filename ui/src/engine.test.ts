@@ -3,31 +3,37 @@ import { runDpJson } from "./engine";
 import { blueArchive } from "./preset";
 
 describe("DP backend selection", () => {
-  it("calls the exact WASM engine for exact numeric mode", () => {
-    const run_dp_json = vi.fn(() => "scaled");
-    const run_exact_json = vi.fn(() => "exact");
+  it("calls the exact engine for exact numeric mode", async () => {
+    const runDpJsonBackend = vi.fn(async () => "scaled");
+    const runExactJson = vi.fn(async () => "exact");
     const model = {
       ...blueArchive,
       run: { ...blueArchive.run, numeric: "exact" as const },
     };
 
-    expect(runDpJson({ run_dp_json, run_exact_json }, model)).toEqual({
+    await expect(runDpJson({
+      runDpJson: runDpJsonBackend,
+      runExactJson,
+    }, model)).resolves.toEqual({
       engine: "EXACT",
       json: "exact",
     });
-    expect(run_exact_json).toHaveBeenCalledOnce();
-    expect(run_dp_json).not.toHaveBeenCalled();
+    expect(runExactJson).toHaveBeenCalledOnce();
+    expect(runDpJsonBackend).not.toHaveBeenCalled();
   });
 
-  it("keeps approximate modes on the generic DP WASM engine", () => {
-    const run_dp_json = vi.fn(() => "scaled");
-    const run_exact_json = vi.fn(() => "exact");
+  it("keeps approximate modes on the generic DP engine", async () => {
+    const runDpJsonBackend = vi.fn(async () => "scaled");
+    const runExactJson = vi.fn(async () => "exact");
 
-    expect(runDpJson({ run_dp_json, run_exact_json }, blueArchive)).toEqual({
+    await expect(runDpJson({
+      runDpJson: runDpJsonBackend,
+      runExactJson,
+    }, blueArchive)).resolves.toEqual({
       engine: "DP",
       json: "scaled",
     });
-    expect(run_dp_json).toHaveBeenCalledOnce();
-    expect(run_exact_json).not.toHaveBeenCalled();
+    expect(runDpJsonBackend).toHaveBeenCalledOnce();
+    expect(runExactJson).not.toHaveBeenCalled();
   });
 });

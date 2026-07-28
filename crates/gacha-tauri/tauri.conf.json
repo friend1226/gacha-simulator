@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Gacha Lab",
+  "version": "0.1.0",
+  "identifier": "com.friend1226.gacha-simulator",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../ui run dev -- --host 127.0.0.1 --port 5173 --strictPort",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm --prefix ../ui run build",
+    "frontendDist": "../../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Gacha Lab",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 700,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "capabilities": ["main-capability"]
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

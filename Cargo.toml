@@ -2,6 +2,7 @@
 members = [
   "crates/gacha-core",
   "crates/gacha-cli",
+  "crates/gacha-tauri",
   "crates/gacha-wasm",
 ]
 resolver = "2"
@@ -30,4 +31,6 @@ thiserror = "2.0"
 wasm-bindgen = "0.2"
 zstd = "0.13"
 sysinfo = "0.30"
+tauri = "2.11.5"
+tauri-build = "2.6.3"
 

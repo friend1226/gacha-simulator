@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "tauri:dev": "cd ../crates/gacha-tauri && tauri dev",
+    "tauri:build:windows": "cd ../crates/gacha-tauri && tauri build"
   },
   "dependencies": {
+    "@tauri-apps/api": "2.11.1",
     "@vitejs/plugin-react": "^4.7.0",
     "blockly": "^12.3.1",
     "lucide-react": "^0.468.0",
@@ -17,6 +20,7 @@
     "vite": "^6.0.7"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "typescript": "^5.7.3",

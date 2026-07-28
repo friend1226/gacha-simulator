@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Braces, ChevronDown, CircleAlert, CircleCheck, FlaskConical, Play, RotateCcw } from "lucide-react";
 import { Blockly, loadIr, toolbox, workspaceToIr } from "./blockly";
-import { runDpJson, type WasmEngine } from "./engine";
+import { loadEngineBackend, runDpJson } from "./engine";
 import { blueArchive } from "./preset";
 import type { ModelIr } from "./types";
 import { validateLocally } from "./validator";
@@ -89,12 +89,13 @@ export function App() {
     }
     setRunMessage(engine === "dp" ? "마르코프 DP 실행 준비 중…" : "몬테카를로 실행 준비 중…");
     try {
-      const wasmPath = "/wasm/gacha_wasm.js";
-      const wasm = await import(/* @vite-ignore */ wasmPath) as WasmEngine;
-      await wasm.default?.();
+      const backend = await loadEngineBackend();
       const execution = engine === "dp"
-        ? runDpJson(wasm, model)
-        : { engine: "MC" as const, json: wasm.run_mc_json(JSON.stringify(model), 100_000, 42) };
+        ? await runDpJson(backend, model)
+        : {
+            engine: "MC" as const,
+            json: await backend.runMcJson(JSON.stringify(model), 100_000, 42),
+          };
       const parsed = JSON.parse(execution.json);
       const clampEvents = parsed.clampEvents ?? 0;
       setResult({

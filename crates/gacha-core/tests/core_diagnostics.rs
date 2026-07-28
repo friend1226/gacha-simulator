@@ -39,6 +39,28 @@ fn e002_rejects_negative_literal_and_preserves_block_id() {
 }
 
 #[test]
+fn e005_rejects_probability_rule_for_unknown_entity() {
+    let mut ir = base_model(json!({"lit": "0.5"}), Vec::new());
+    ir.prob_rules = serde_json::from_value(json!([{
+        "target": "missing",
+        "expr": {"lit": "0.25"},
+        "blockId": "missing-rule"
+    }]))
+    .expect("probability rule must deserialize");
+
+    let error = compile(&ir).expect_err("unknown probability rule target must fail compilation");
+    let diagnostic = error
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E005")
+        .expect("E005 diagnostic");
+
+    assert_eq!(diagnostic.severity, Severity::Error);
+    assert_eq!(diagnostic.block_id.as_deref(), Some("missing-rule"));
+    assert!(diagnostic.message.contains("missing"));
+}
+
+#[test]
 fn e002_uses_control_bounds_without_false_positive_for_correlated_terms() {
     let state_vars = vec![json!({
         "id": "pity",

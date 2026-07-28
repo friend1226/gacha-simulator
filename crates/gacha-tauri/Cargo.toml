@@ -1,0 +1,17 @@
+[package]
+name = "gacha-tauri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "gacha_tauri_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+gacha-core = { path = "../gacha-core" }
+serde_json.workspace = true
+tauri.workspace = true

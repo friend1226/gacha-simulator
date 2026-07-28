@@ -2,7 +2,7 @@
 
 ## 완료
 
-- Cargo workspace: `gacha-core`, `gacha-cli`, `gacha-wasm`
+- Cargo workspace: `gacha-core`, `gacha-cli`, `gacha-wasm`, `gacha-tauri`
 - 정확 십진/분수/지수 리터럴 파서 (`0.007` → `7/1000`)
 - `Prob` 계층과 `F64`, 비트 정규화 기반 `ScaledF64`
 - 공통분모 BigInt exact DP (내부 루프 GCD 없음, 선택적 레이어 약분)
@@ -30,8 +30,7 @@
 
 - 확률표 1천만 제어상태 초과 시 lazy cache
 - Web Worker 병렬 MC와 자동 CI 폭 정지
-- E005 순환 참조 정적 분석 보강
-- Tauri 데스크톱 패키징
+- Tauri Windows 설치 프로그램 및 3플랫폼 빌드 파이프라인
 - 10개 이상 게임 프리셋 및 골든 파일
 
 ## 이 환경에서 실행한 검증
@@ -163,3 +162,13 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 이번 라운드로 M8을 마무리한다. 하드-pity 케이스의 §6.6 목표 미달(픽업 단독 1.6배,
 결합 2.3배)은 재현 벤치마크와 함께 유지하되, sharded layer 등 자료구조 변경이 필요한
 후속 성능 과제로 이관한다.
+
+## 2026-07-29 E005 정합성 및 Tauri Windows 스켈레톤
+
+- DESIGN §3.4의 E005를 실제 구현인 “`probRule`이 정의되지 않은 엔티티를 대상으로 함”으로 재정의했다. 기존 순환 참조 항목은 현재 IR이 엔티티 확률 참조를 표현하지 못하므로 폐기하고 §13에 조사 근거를 기록했다.
+- E005가 오류 심각도와 원래 `blockId`를 보존하는 회귀 테스트를 추가했다.
+- `gacha-tauri` 크레이트를 신설하고 Tauri 2 명령이 WASM을 거치지 않고 `gacha-core`의 validate/DP/exact/MC 경로를 직접 호출하도록 연결했다.
+- React/Blockly UI는 공용 엔진 어댑터만 추가했다. Tauri에서는 IPC를, 일반 웹에서는 기존 WASM 모듈을 선택하므로 화면 코드는 분기하지 않는다.
+- 이번 범위는 `bundle.active=false`인 Windows 실행 파일까지다. 설치 프로그램, dmg/AppImage, 3플랫폼 자동 빌드, 프리셋 팩과 M10 사용자 문서는 후속으로 남긴다.
+- `cargo test --workspace`: **47/47 통과**, UI 테스트 **4/4 통과**, Vite 프로덕션 빌드 성공.
+- `npm run tauri:build:windows`: 성공. `target/release/gacha-tauri.exe` 생성 확인.
