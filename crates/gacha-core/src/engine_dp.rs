@@ -7,6 +7,13 @@ use rustc_hash::FxHashMap;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::snapshot::{
+    load_snapshot, LoadedSnapshot, SnapshotError, SnapshotManifest, SnapshotOptions,
+    SnapshotPolicy, SnapshotSession,
+};
+#[cfg(target_arch = "wasm32")]
+struct SnapshotSession;
 
 #[derive(Debug, Clone)]
 pub struct DpOptions {
@@ -45,6 +52,15 @@ pub enum DpRunResult {
     Exact(ExactResult),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, thiserror::Error)]
+pub enum SnapshotRunError {
+    #[error(transparent)]
+    Exact(#[from] ExactError),
+    #[error(transparent)]
+    Snapshot(#[from] SnapshotError),
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FirstHitResult {
@@ -80,11 +96,75 @@ pub fn run_dp_f64(
     run_generic::<F64>(model, options, progress, "f64")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_dp_with_snapshots(
+    model: &CompiledModel,
+    options: DpOptions,
+    snapshot_options: SnapshotOptions,
+    progress: impl FnMut(u32, u32) -> bool,
+) -> Result<(DpRunResult, SnapshotManifest), SnapshotRunError> {
+    let mut session = SnapshotSession::new(model, snapshot_options)?;
+    let result = match model.numeric {
+        NumericBackend::F64 => DpRunResult::Approximate(run_generic_with_snapshot::<F64>(
+            model, options, progress, "f64", Some(&mut session),
+        )),
+        NumericBackend::Scaled => DpRunResult::Approximate(run_generic_with_snapshot::<ScaledF64>(
+            model, options, progress, "scaled", Some(&mut session),
+        )),
+        NumericBackend::Exact => DpRunResult::Exact(
+            crate::engine_exact::run_exact_with_snapshot(
+                model, ExactOptions::default(), progress, &mut session,
+            )?,
+        ),
+    };
+    Ok((result, session.finish()?))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn restore_dp_snapshot(
+    model: &CompiledModel,
+    options: DpOptions,
+    output_dir: std::path::PathBuf,
+    target_layer: u32,
+) -> Result<LoadedSnapshot, SnapshotRunError> {
+    let mut pinned_layers = std::collections::BTreeSet::new();
+    pinned_layers.insert(target_layer);
+    let (_, manifest) = run_dp_with_snapshots(
+        model,
+        options,
+        SnapshotOptions {
+            output_dir,
+            policy: SnapshotPolicy::Checkpoint,
+            pinned_layers,
+            confirm_full: false,
+        },
+        |done, _| done < target_layer,
+    )?;
+    let target_name = format!("layer-{target_layer:06}");
+    let path = manifest.files.iter()
+        .find(|path| path.file_stem().and_then(|name| name.to_str())
+            == Some(target_name.as_str()))
+        .ok_or_else(|| SnapshotError::Invalid(format!(
+            "target layer {target_layer} was not produced",
+        )))?;
+    Ok(load_snapshot(path, model.model_hash)?)
+}
+
 fn run_generic<P: Prob>(
+    model: &CompiledModel,
+    options: DpOptions,
+    progress: impl FnMut(u32, u32) -> bool,
+    backend: &str,
+) -> DpResult {
+    run_generic_with_snapshot::<P>(model, options, progress, backend, None)
+}
+
+fn run_generic_with_snapshot<P: Prob>(
     model: &CompiledModel,
     options: DpOptions,
     mut progress: impl FnMut(u32, u32) -> bool,
     backend: &str,
+    mut snapshot: Option<&mut SnapshotSession>,
 ) -> DpResult {
     let started = Instant::now();
     let converted: Vec<Vec<Vec<P>>> = model.prob_table.entries.iter().map(|by_trial| {
@@ -95,6 +175,10 @@ fn run_generic<P: Prob>(
     let initial = codec.encode(&model.control_init, &vec![0; model.state_leaves.len()])
         .expect("compiled initial state must fit its codec");
     let mut layer = FxHashMap::from_iter([(initial, P::one())]);
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(session) = snapshot.as_deref_mut() {
+        session.on_approx_layer(model, &codec, 0, &layer);
+    }
     let mut hit_pmf = model.condition.as_ref().map(|_| vec![P::zero(); model.max_trials as usize + 1]);
     let mut pruned_mass = 0.0;
     let mut completed_trials = 0;
@@ -122,6 +206,10 @@ fn run_generic<P: Prob>(
                 if !keep { pruned_mass += p.to_f64_lossy(); }
                 keep
             });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(session) = snapshot.as_deref_mut() {
+            session.on_approx_layer(model, &codec, next_trial, &next);
         }
         layer = next;
         completed_trials = next_trial;

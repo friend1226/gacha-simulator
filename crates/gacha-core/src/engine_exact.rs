@@ -8,6 +8,10 @@ use rustc_hash::FxHashMap;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::snapshot::SnapshotSession;
+#[cfg(target_arch = "wasm32")]
+struct SnapshotSession;
 
 #[derive(Debug, Clone)]
 pub struct ExactOptions {
@@ -83,7 +87,26 @@ pub enum ExactError {
 pub fn run_exact(
     model: &CompiledModel,
     options: ExactOptions,
+    progress: impl FnMut(u32, u32) -> bool,
+) -> Result<ExactResult, ExactError> {
+    run_exact_internal(model, options, progress, None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn run_exact_with_snapshot(
+    model: &CompiledModel,
+    options: ExactOptions,
+    progress: impl FnMut(u32, u32) -> bool,
+    snapshot: &mut SnapshotSession,
+) -> Result<ExactResult, ExactError> {
+    run_exact_internal(model, options, progress, Some(snapshot))
+}
+
+fn run_exact_internal(
+    model: &CompiledModel,
+    options: ExactOptions,
     mut progress: impl FnMut(u32, u32) -> bool,
+    mut snapshot: Option<&mut SnapshotSession>,
 ) -> Result<ExactResult, ExactError> {
     if !model.analysis.exact_available || model.exact_lcm.bits() > 128 {
         return Err(ExactError::Unavailable);
@@ -100,6 +123,10 @@ pub fn run_exact(
     let initial = codec.encode(&model.control_init, &vec![0; model.state_leaves.len()])?;
     let mut cells = FxHashMap::from_iter([(initial, BigInt::one())]);
     let mut denominator = BigInt::one();
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(session) = snapshot.as_deref_mut() {
+        session.on_exact_layer(model, &codec, 0, &cells, &denominator);
+    }
     let mut peak_states = 1usize;
     let mut hit_pmf = model.condition.as_ref()
         .map(|_| vec![BigInt::zero(); model.max_trials as usize + 1]);
@@ -150,6 +177,10 @@ pub fn run_exact(
             sum += pmf.iter().sum::<BigInt>();
         }
         assert_eq!(sum, denominator, "exact DP mass conservation failure");
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(session) = snapshot.as_deref_mut() {
+            session.on_exact_layer(model, &codec, next_trial, &next, &denominator);
+        }
         cells = next;
         trial = next_trial;
         if !progress(trial, model.max_trials) { return Err(ExactError::Cancelled); }

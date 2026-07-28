@@ -7,6 +7,7 @@ use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use thiserror::Error;
 
@@ -120,6 +121,7 @@ pub struct CompiledModel {
     pub diagnostics: Vec<Diagnostic>,
     pub analysis: MarkovAnalysis,
     pub exact_lcm: BigInt,
+    pub model_hash: [u8; 32],
 }
 
 impl CompiledModel {
@@ -448,6 +450,9 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         est_bytes_per_layer: total_states.saturating_mul(40),
         exact_available,
     };
+    let model_hash: [u8; 32] = Sha256::digest(
+        serde_json::to_vec(ir).expect("serializable Model IR"),
+    ).into();
     Ok(CompiledModel {
         name: ir.name.clone(),
         max_trials: ir.run.max_trials,
@@ -466,6 +471,7 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         diagnostics,
         analysis,
         exact_lcm,
+        model_hash,
     })
 }
 

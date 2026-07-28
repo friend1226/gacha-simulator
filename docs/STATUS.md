@@ -20,6 +20,7 @@
 - ExactInt DP 최초 달성 흡수 상태와 공통분모 BigInt PMF/CDF
 - DP/Exact 공용 mixed-radix `u64` 상태 코덱
 - native MC·DP·ExactInt의 결정적 Rayon 병렬 전개
+- GCHS/zstd 스냅샷과 aggregate/checkpoint/full 정책
 - 정확 모드 시행/상태/메모리/분모 가드레일과 진행/취소 콜백
 - CLI 검증/DP/exact/MC 명령과 WASM JSON API
 - 블루 아카이브 및 하드 천장 프리셋
@@ -28,7 +29,6 @@
 ## 후속 마일스톤
 
 - 확률표 1천만 제어상태 초과 시 lazy cache
-- snapshot의 GCHS/zstd/checkpoint 직렬화
 - Web Worker 병렬 MC와 자동 CI 폭 정지
 - E005 순환 참조 정적 분석 보강
 - Tauri 데스크톱 패키징
@@ -134,3 +134,13 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - ExactInt 결과는 1/4 스레드에서 경과 시간을 제외한 JSON 바이트가 완전히 동일하며 프리셋 골든도 불변이다.
 - release/기본 프루닝 4스레드 실측(Phase 1과 동일 모델): 픽업 단독 2,107ms(1스레드 5,372ms), 결합 84,254ms. Phase 1 대비 약 2.3배 개선됐지만 §6.6 목표는 여전히 미달이다.
 - 로컬 `cargo test --workspace`: **37/37 통과**. 기존 경고 1건 외 신규 경고 없음.
+
+## 2026-07-28 M8 Phase 4 — GCHS 스냅샷
+
+- IR canonical JSON SHA-256을 모델에 고정하고 GCHS v1 헤더, 정렬 상태 delta+varint, zstd 레벨 3 본문을 구현했다.
+- `aggregate`(기본, 매 레이어 주변분포), `checkpoint`(1/2/5 로그 간격+핀), `full`(매 레이어) 정책을 ScaledF64/F64/ExactInt에 연결했다.
+- ExactInt 스냅샷은 레이어 공통분모와 BigInt 분자를 보존한다. 로더는 모델 해시 불일치를 명확히 거부한다.
+- 200MB 사전 경고와 사용 가능 메모리 50% 거부, `full` 명시 확인을 구현했다. CLI는 `gacha snapshot <MODEL> <OUTPUT> --policy ...`로 노출한다.
+- N=1,000 결합 추적 휴리스틱 용량 스모크 범위는 aggregate 1~20MB, checkpoint 10~200MB, full 1~10GB로 고정했다.
+- `restore_dp_snapshot`은 핀 레이어를 재계산해 복원한다. 가장 가까운 체크포인트에서 재개하려면 최초 달성 누적 질량까지 직렬화해야 하므로 §13.1 후속 차이로 기록했다. WASM/UI 노출도 후속 범위다.
+- 로컬 `cargo test --workspace`: **41/41 통과**, `--no-default-features` 코어 단위 테스트 20/20 통과. TypeScript strict 검사와 UI 테스트 4/4, CLI 도움말 스모크도 통과했다.

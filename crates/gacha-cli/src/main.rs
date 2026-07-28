@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use gacha_core::{
-    compile, run_dp, run_exact, run_mc, DpOptions, ExactOptions, McOptions, ModelIr,
+    compile, run_dp, run_dp_with_snapshots, run_exact, run_mc, DpOptions, ExactOptions,
+    McOptions, ModelIr, SnapshotOptions, SnapshotPolicy,
 };
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 
 #[derive(Parser)]
 #[command(name = "gacha", version, about = "Exact and Monte Carlo gacha probability simulator")]
@@ -32,6 +33,31 @@ enum Command {
         #[arg(long, default_value_t = 42)]
         seed: u64,
     },
+    Snapshot {
+        model: PathBuf,
+        output: PathBuf,
+        #[arg(long, value_enum, default_value_t = SnapshotPolicyArg::Aggregate)]
+        policy: SnapshotPolicyArg,
+        #[arg(long)]
+        pin: Vec<u32>,
+        #[arg(long)]
+        confirm_full: bool,
+        #[arg(long)]
+        no_prune: bool,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum SnapshotPolicyArg { Aggregate, Checkpoint, Full }
+
+impl From<SnapshotPolicyArg> for SnapshotPolicy {
+    fn from(value: SnapshotPolicyArg) -> Self {
+        match value {
+            SnapshotPolicyArg::Aggregate => Self::Aggregate,
+            SnapshotPolicyArg::Checkpoint => Self::Checkpoint,
+            SnapshotPolicyArg::Full => Self::Full,
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -82,6 +108,27 @@ fn main() -> Result<()> {
                 },
             );
             println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        Command::Snapshot { model, output, policy, pin, confirm_full, no_prune } => {
+            let compiled = load(&model)?;
+            let (result, manifest) = run_dp_with_snapshots(
+                &compiled,
+                DpOptions { prune_log10: (!no_prune).then_some(-18.0) },
+                SnapshotOptions {
+                    output_dir: output,
+                    policy: policy.into(),
+                    pinned_layers: pin.into_iter().collect::<BTreeSet<_>>(),
+                    confirm_full,
+                },
+                |done, total| {
+                    if done == total || done % 100 == 0 { eprintln!("Snapshot DP {done}/{total}"); }
+                    true
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                "result": result,
+                "snapshot": manifest,
+            }))?);
         }
     }
     Ok(())
