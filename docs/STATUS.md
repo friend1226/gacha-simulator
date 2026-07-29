@@ -331,6 +331,18 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
 - Netlify 사이트의 Build status를 `stopped`로 두어도 CLI 프리빌트 배포는 정상
   게시되는 것을 확인했다. Netlify 자체 빌드는 `netlify.toml`의 `ignore = "exit 0"`으로도
   이중 차단한다.
-- 워크플로 로그에 Node.js 20 지원 종료 경고가 나온다. `actions/checkout@v4`,
-  `actions/setup-node@v4`, `jetli/wasm-pack-action@v0.4.0`이 해당하며 현재는 러너가
-  Node 24로 강제 실행해 동작한다. `ci.yml`도 같은 액션을 쓰므로 함께 올린다.
+- Node.js 20 지원 종료 경고를 없애기 위해 `actions/checkout@v7.0.1`과
+  `actions/setup-node@v7.0.0`으로 갱신했다. 2022년 이후 새 릴리스가 없는
+  `jetli/wasm-pack-action`은 `taiki-e/install-action@v2.85.3`과
+  `wasm-pack@0.15.0` 조합으로 교체했다.
+
+## 2026-07-29 dev 브랜치 프로세스와 워크플로 갱신
+
+- `dev`에서 작업 브랜치를 분기해 완료 후 `dev`로 합치고, 소유자가 일단락을 판단할
+  때만 `dev`를 프로덕션 브랜치인 `main`으로 병합하는 전달 절차를 도입했다.
+- CI의 push 대상에 `dev`를 추가했다. push 워크플로는 변경 파일이 전부 `docs/**` 또는
+  Markdown일 때 건너뛰지만, 브랜치 보호 필수 체크가 사라지지 않도록
+  `pull_request`에는 경로 필터를 적용하지 않았다.
+- PR #3의 push와 pull request 이벤트에서 Rust 53개와 UI 11개 테스트가 모두
+  통과했다. `main` 병합 뒤 CI와 Netlify 프로덕션 배포도 성공했으며, 새 액션과
+  wasm-pack 설치 방식으로 WASM 빌드·필수 산출물 검사·게시까지 완료했다.
