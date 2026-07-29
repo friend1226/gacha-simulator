@@ -9,5 +9,6 @@ export interface EngineWorkerRequest {
 }
 
 export type EngineWorkerResponse =
+  | { id: number; progress: { completed: number; total: number } }
   | { id: number; ok: true; json: string }
   | { id: number; ok: false; error: string };

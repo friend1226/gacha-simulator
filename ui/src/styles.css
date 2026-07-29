@@ -87,6 +87,8 @@ button { cursor: pointer; }
 .run-buttons .cancel { background: #8a3e50; }
 .run-buttons button:disabled { opacity: .45; cursor: wait; }
 .run-toolbar p { grid-column: 1 / -1; margin: 0; color: #727c8e; font-size: 11px; }
+.run-progress { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; color: #9ba4b5; font: 11px "IBM Plex Mono", monospace; }
+.run-progress progress { width: min(420px, 70%); height: 8px; accent-color: #725be2; }
 .track-picker { margin: 10px 0 18px; padding: 10px 14px; border: 1px solid #292f3b; border-radius: 8px; color: #9da6b6; font-size: 12px; }
 .track-picker div { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .track-picker label { padding: 5px 8px; background: #1b202a; border-radius: 6px; }

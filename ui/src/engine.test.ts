@@ -43,7 +43,8 @@ describe("web worker backend", () => {
   it("routes requests and resolves matching worker responses", async () => {
     const worker = fakeWorker();
     const backend = new WebWorkerEngineBackend(() => worker);
-    const result = backend.runMcJson("model", 100_000, 42);
+    const onProgress = vi.fn();
+    const result = backend.runMcJson("model", 100_000, 42, onProgress);
 
     expect(worker.messages).toEqual([{
       id: 1,
@@ -52,6 +53,8 @@ describe("web worker backend", () => {
       runs: 100_000,
       seed: 42,
     }]);
+    worker.respond({ id: 1, progress: { completed: 10_000, total: 100_000 } });
+    expect(onProgress).toHaveBeenCalledWith({ completed: 10_000, total: 100_000 });
     worker.respond({ id: 1, ok: true, json: "result" });
     await expect(result).resolves.toBe("result");
   });

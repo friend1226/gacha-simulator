@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, FlaskConical, RotateCcw, Save, Settings, Upload } from "lucide-react";
 import { Blockly, installWorkspaceVolume, loadIr, toolbox, workspaceToIr } from "./blockly";
-import { EngineCancelledError, loadEngineBackend, runDpJson, type EngineBackend } from "./engine";
+import { EngineCancelledError, loadEngineBackend, runDpJson, type EngineBackend, type EngineProgress } from "./engine";
 import { blueArchive, presets } from "./preset";
 import { loadSettings, normalizeSettings, saveSettings, type AppSettings } from "./settings";
 import { normalizeFirstHit } from "./firstHit";
@@ -43,6 +43,7 @@ export function App() {
   const [message, setMessage] = useState("모델을 검증한 뒤 계산 방식을 선택하세요.");
   const [running, setRunning] = useState<"dp" | "mc">();
   const [canCancel, setCanCancel] = useState(false);
+  const [progress, setProgress] = useState<EngineProgress>();
   const [results, setResults] = useState<{ dp?: EngineResult; mc?: EngineResult }>({});
   const validation = useMemo(() => validateLocally(model), [model]);
   const hasError = validation.diagnostics.some((item) => item.severity === "error");
@@ -178,16 +179,20 @@ export function App() {
     const currentExecution = ++executionId.current;
     setRunning(engine);
     setCanCancel(false);
+    setProgress(undefined);
     setMessage(engine === "dp" ? "정확 계산을 실행하는 중…" : "시뮬레이션을 실행하는 중…");
     try {
       const backend = await loadEngineBackend();
       engineBackend.current = backend;
       if (currentExecution !== executionId.current) return;
       setCanCancel(backend.platform === "web");
+      const updateProgress = (next: EngineProgress) => {
+        if (currentExecution === executionId.current) setProgress(next);
+      };
       const source = JSON.stringify(model);
       const execution = engine === "dp"
-        ? await runDpJson(backend, model)
-        : { engine: "MC" as const, json: await backend.runMcJson(source, runs, seed) };
+        ? await runDpJson(backend, model, updateProgress)
+        : { engine: "MC" as const, json: await backend.runMcJson(source, runs, seed, updateProgress) };
       if (currentExecution !== executionId.current) return;
       const parsed = JSON.parse(execution.json) as Partial<EngineResult>;
       const result: EngineResult = {
@@ -219,6 +224,7 @@ export function App() {
       if (currentExecution === executionId.current) {
         setRunning(undefined);
         setCanCancel(false);
+        setProgress(undefined);
       }
     }
   }
@@ -229,6 +235,7 @@ export function App() {
     engineBackend.current?.cancel();
     setRunning(undefined);
     setCanCancel(false);
+    setProgress(undefined);
     setMessage("계산을 취소했습니다.");
   }
 
@@ -272,7 +279,7 @@ export function App() {
         <div hidden={topTab !== "model"} className="tab-fill">
           <ModelPanel blockHost={blockHost} editorTab={editorTab} setEditorTab={setEditorTab} showMobileBlockNotice={showMobileBlockNotice} dismissMobileBlockNotice={dismissMobileBlockNotice} model={model} json={json} setJson={setJson} applyJson={applyJson} validation={validation} focusDiagnostic={focusDiagnostic} openHelp={openHelp} />
         </div>
-        {topTab === "results" && <ResultPanel model={model} updateModel={(next) => setModelSynced(next)} settings={settings} results={results} running={running} canCancel={canCancel} message={message} run={run} cancelRun={cancelRun} />}
+        {topTab === "results" && <ResultPanel model={model} updateModel={(next) => setModelSynced(next)} settings={settings} results={results} running={running} canCancel={canCancel} progress={progress} message={message} run={run} cancelRun={cancelRun} />}
         {topTab === "help" && <HelpPanel focusCode={helpCode} />}
         {topTab === "settings" && <SettingsPanel settings={settings} update={updateSettings} />}
       </main>

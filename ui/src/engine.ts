@@ -2,11 +2,18 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { ModelIr } from "./types";
 import type { EngineWorkerMethod, EngineWorkerRequest, EngineWorkerResponse } from "./engineWorkerProtocol";
 
+export interface EngineProgress {
+  completed: number;
+  total: number;
+}
+
+export type EngineProgressCallback = (progress: EngineProgress) => void;
+
 export interface EngineBackend {
   platform: "web" | "tauri";
-  runDpJson: (source: string) => Promise<string>;
-  runExactJson: (source: string) => Promise<string>;
-  runMcJson: (source: string, runs: number, seed: number) => Promise<string>;
+  runDpJson: (source: string, onProgress?: EngineProgressCallback) => Promise<string>;
+  runExactJson: (source: string, onProgress?: EngineProgressCallback) => Promise<string>;
+  runMcJson: (source: string, runs: number, seed: number, onProgress?: EngineProgressCallback) => Promise<string>;
   cancel: () => void;
 }
 
@@ -31,21 +38,22 @@ export class WebWorkerEngineBackend implements EngineBackend {
   private pending = new Map<number, {
     resolve: (json: string) => void;
     reject: (error: Error) => void;
+    onProgress?: EngineProgressCallback;
   }>();
 
   constructor(private readonly createWorker: () => WorkerLike = () =>
     new Worker(new URL("./engine.worker.ts", import.meta.url), { type: "module" })) {}
 
-  runDpJson(source: string) {
-    return this.request("dp", source);
+  runDpJson(source: string, onProgress?: EngineProgressCallback) {
+    return this.request("dp", source, undefined, undefined, onProgress);
   }
 
-  runExactJson(source: string) {
-    return this.request("exact", source);
+  runExactJson(source: string, onProgress?: EngineProgressCallback) {
+    return this.request("exact", source, undefined, undefined, onProgress);
   }
 
-  runMcJson(source: string, runs: number, seed: number) {
-    return this.request("mc", source, runs, seed);
+  runMcJson(source: string, runs: number, seed: number, onProgress?: EngineProgressCallback) {
+    return this.request("mc", source, runs, seed, onProgress);
   }
 
   cancel() {
@@ -55,11 +63,17 @@ export class WebWorkerEngineBackend implements EngineBackend {
     this.pending.clear();
   }
 
-  private request(method: EngineWorkerMethod, source: string, runs?: number, seed?: number) {
+  private request(
+    method: EngineWorkerMethod,
+    source: string,
+    runs?: number,
+    seed?: number,
+    onProgress?: EngineProgressCallback,
+  ) {
     const worker = this.ensureWorker();
     const id = this.nextId++;
     return new Promise<string>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve, reject, onProgress });
       worker.postMessage({ id, method, source, runs, seed });
     });
   }
@@ -71,6 +85,10 @@ export class WebWorkerEngineBackend implements EngineBackend {
       const response = event.data;
       const request = this.pending.get(response.id);
       if (!request) return;
+      if ("progress" in response) {
+        request.onProgress?.(response.progress);
+        return;
+      }
       this.pending.delete(response.id);
       if (response.ok) request.resolve(response.json);
       else request.reject(new Error(response.error));
@@ -108,9 +126,10 @@ export async function loadEngineBackend(): Promise<EngineBackend> {
 export async function runDpJson(
   backend: Pick<EngineBackend, "runDpJson" | "runExactJson">,
   model: ModelIr,
+  onProgress?: EngineProgressCallback,
 ): Promise<{ engine: "DP" | "EXACT"; json: string }> {
   const source = JSON.stringify(model);
   return model.run.numeric === "exact"
-    ? { engine: "EXACT", json: await backend.runExactJson(source) }
-    : { engine: "DP", json: await backend.runDpJson(source) };
+    ? { engine: "EXACT", json: await backend.runExactJson(source, onProgress) }
+    : { engine: "DP", json: await backend.runDpJson(source, onProgress) };
 }
