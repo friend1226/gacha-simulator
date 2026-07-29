@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +21,7 @@ jobs:
     name: Test, build, and deploy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -27,7 +30,7 @@ jobs:
       - name: Test Rust workspace
         run: cargo test --workspace --exclude gacha-tauri
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -47,9 +50,9 @@ jobs:
         run: npm test
 
       - name: Install wasm-pack
-        uses: jetli/wasm-pack-action@v0.4.0
+        uses: taiki-e/install-action@v2.85.3
         with:
-          version: v0.15.0
+          tool: wasm-pack@0.15.0
       - name: Build WebAssembly
         run: wasm-pack build crates/gacha-wasm --target web --out-dir ../../ui/public/wasm
       - name: Build production UI
