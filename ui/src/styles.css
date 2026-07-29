@@ -2,10 +2,10 @@
 
 :root { font-family: "Noto Sans KR", system-ui, sans-serif; color: #e9edf5; background: #0d0f14; font-synthesis: none; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: #0d0f14; }
+body { margin: 0; min-width: 320px; min-height: 100vh; min-height: 100dvh; background: #0d0f14; }
 button, select, textarea, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
-.app-shell { min-height: 100vh; height: 100vh; display: grid; grid-template-rows: 62px 1fr; overflow: hidden; }
+.app-shell { min-height: 100vh; min-height: 100dvh; height: 100vh; height: 100dvh; display: grid; grid-template-rows: 62px 1fr; overflow: hidden; }
 .app-header { display: flex; align-items: center; gap: 22px; padding: 0 20px; background: rgba(17,20,27,.98); border-bottom: 1px solid #262b36; }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; white-space: nowrap; }
 .brand svg { color: #ff6f9f; }
@@ -19,8 +19,8 @@ button { cursor: pointer; }
 .file-button input { display: none; }
 .source-badge { padding: 3px 7px; border-radius: 99px; background: #3a2d1d; color: #e8b968; font-size: 9px; }
 .source-badge.official { background: #18352c; color: #65d6a4; }
-.app-main, .tab-fill { min-height: 0; height: 100%; overflow: auto; }
-.model-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(560px, 1fr) 390px; }
+.app-main, .tab-fill { min-width: 0; min-height: 0; height: 100%; overflow: auto; }
+.model-layout { min-width: 0; height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(560px, 1fr) 390px; }
 .editor { min-width: 0; position: relative; display: grid; grid-template-rows: 49px 1fr; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid #262b36; background: #11141b; }
 .tabs { display: flex; gap: 4px; }
@@ -33,7 +33,7 @@ button { cursor: pointer; }
 .json-pane textarea { width: 100%; height: 100%; resize: none; padding: 18px 20px; color: #cbd6e8; background: #0e1117; border: 1px solid #262d3a; border-radius: 9px; font: 13px/1.65 "IBM Plex Mono", monospace; outline: none; }
 .json-pane textarea:focus { border-color: #6c5ce7; }
 .apply { position: absolute; right: 30px; top: 30px; padding: 8px 12px; border: 0; border-radius: 7px; background: #6c5ce7; }
-.validation-panel { overflow: auto; border-left: 1px solid #262b36; background: #151820; }
+.validation-panel { min-width: 0; overflow: auto; border-left: 1px solid #262b36; background: #151820; }
 .aside-title { height: 49px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid #282e3a; font-size: 13px; font-weight: 600; }
 .status { font-size: 11px; padding: 3px 8px; border-radius: 999px; }
 .status.good { color: #65d6a4; background: #18352c; }
@@ -57,7 +57,7 @@ button { cursor: pointer; }
 .diagnostics span { font-size: 11px; line-height: 1.45; }
 .diagnostics b { margin-right: 6px; color: #c8ced9; }
 .diagnostics small { display: block; margin-top: 4px; color: #8879d9; text-decoration: underline; }
-.content-panel, .results-page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 70px; }
+.content-panel, .results-page { min-width: 0; width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 70px; }
 .content-panel h1 { margin: 0; font-size: 28px; }
 .content-panel > p { color: #858e9e; }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 14px; margin-top: 28px; }
@@ -77,7 +77,7 @@ button { cursor: pointer; }
 .diagnostic-help article { padding: 12px 14px; border: 1px solid #292f3b; border-radius: 8px; background: #151922; }
 .diagnostic-help article.focused { border-color: #8a72f4; box-shadow: 0 0 0 2px rgba(138,114,244,.15); }
 .diagnostic-help span { display: block; margin-top: 5px; color: #8d96a7; font-size: 12px; }
-.run-toolbar { display: grid; grid-template-columns: repeat(5, minmax(105px, 1fr)) auto; gap: 10px; align-items: end; padding: 16px; border: 1px solid #292f3b; border-radius: 11px; background: #151922; }
+.run-toolbar { min-width: 0; display: grid; grid-template-columns: repeat(5, minmax(105px, 1fr)) auto; gap: 10px; align-items: end; padding: 16px; border: 1px solid #292f3b; border-radius: 11px; background: #151922; }
 .run-toolbar label { display: grid; gap: 5px; color: #929baa; font-size: 10px; }
 .run-toolbar input, .run-toolbar select { width: 100%; min-width: 0; padding: 8px; border: 1px solid #353c49; border-radius: 6px; background: #1e232d; }
 .run-buttons { display: flex; gap: 7px; }
@@ -92,7 +92,7 @@ button { cursor: pointer; }
 .axis-controls > span { color: #768092; font-size: 11px; text-transform: uppercase; }
 .axis-control { display: flex; align-items: center; gap: 5px; padding: 6px 7px; border: 1px solid #303744; border-radius: 7px; background: #171b23; font-size: 11px; }
 .axis-control select { border: 0; background: #232936; font-size: 10px; }
-.comparison-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 14px; }
+.comparison-grid { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(480px, 100%), 1fr)); gap: 14px; }
 .result-card, .series-card { min-width: 0; padding: 16px; border: 1px solid #292f3b; border-radius: 11px; background: #151922; }
 .result-card > header, .series-card > header { display: flex; justify-content: space-between; align-items: start; gap: 10px; margin-bottom: 12px; }
 .result-card h2, .series-card h2 { margin: 0; font-size: 16px; }
@@ -136,10 +136,10 @@ button { cursor: pointer; }
   .header-actions select { max-width: 160px; }
   .source-badge { display: none; }
   .top-tabs button { padding: 0 9px; }
-  .run-toolbar { grid-template-columns: repeat(3, 1fr); }
+  .run-toolbar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
-  .app-shell { height: auto; min-height: 100vh; overflow: visible; grid-template-rows: auto 1fr; }
+  .app-shell { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; grid-template-rows: auto 1fr; }
   .app-header { min-height: 58px; flex-wrap: wrap; padding: 8px 10px; }
   .top-tabs { order: 3; width: 100%; height: 38px; }
   .top-tabs button { flex: 1; justify-content: center; }
@@ -152,8 +152,10 @@ button { cursor: pointer; }
   .settings-grid, .help-columns, .glossary, .diagnostic-help { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
-  .brand b, .header-actions { display: none; }
-  .run-toolbar { grid-template-columns: repeat(2, 1fr); }
+  .brand b { display: none; }
+  .header-actions { order: 2; width: 100%; }
+  .header-actions select { flex: 1 1 auto; width: 0; max-width: none; }
+  .run-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-buttons { grid-column: 1 / -1; }
   .comparison-grid { display: block; }
   .result-card + .result-card { margin-top: 12px; }
