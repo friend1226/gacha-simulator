@@ -14,6 +14,7 @@ import { SettingsPanel } from "./panels/SettingsPanel";
 
 type TopTab = "model" | "results" | "help" | "settings";
 const MODEL_STORAGE = "gacha-lab.model.v2";
+const MOBILE_BLOCK_NOTICE_STORAGE = "gacha-lab.mobile-block-notice.dismissed";
 
 function initialModel(): ModelIr {
   try {
@@ -32,6 +33,7 @@ export function App() {
   const [json, setJson] = useState(() => JSON.stringify(model, null, 2));
   const [topTab, setTopTab] = useState<TopTab>("model");
   const [editorTab, setEditorTab] = useState<"blocks" | "json">("blocks");
+  const [showMobileBlockNotice, setShowMobileBlockNotice] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const settingsRef = useRef(settings);
   const [selectedPreset, setSelectedPreset] = useState("blue-archive-pickup");
@@ -47,6 +49,26 @@ export function App() {
     localStorage.setItem(MODEL_STORAGE, JSON.stringify(model));
   }, [model]);
   useEffect(() => { settingsRef.current = settings; saveSettings(settings); }, [settings]);
+
+  useEffect(() => {
+    if (editorTab !== "blocks") {
+      setShowMobileBlockNotice(false);
+      return;
+    }
+    const media = window.matchMedia("(max-width: 620px)");
+    const updateNotice = () => {
+      let dismissed = false;
+      try {
+        dismissed = localStorage.getItem(MOBILE_BLOCK_NOTICE_STORAGE) === "1";
+      } catch {
+        // Keep the notice available when persistent storage is unavailable.
+      }
+      setShowMobileBlockNotice(media.matches && !dismissed);
+    };
+    updateNotice();
+    media.addEventListener("change", updateNotice);
+    return () => media.removeEventListener("change", updateNotice);
+  }, [editorTab]);
 
   useEffect(() => {
     if (!blockHost.current || workspace.current) return;
@@ -123,6 +145,15 @@ export function App() {
 
   function updateSettings(patch: Partial<AppSettings>) {
     setSettings((current) => normalizeSettings({ ...current, ...patch }));
+  }
+
+  function dismissMobileBlockNotice() {
+    try {
+      localStorage.setItem(MOBILE_BLOCK_NOTICE_STORAGE, "1");
+    } catch {
+      // Dismiss for this session even when persistent storage is unavailable.
+    }
+    setShowMobileBlockNotice(false);
   }
 
   function focusDiagnostic(diagnostic: Diagnostic) {
@@ -217,7 +248,7 @@ export function App() {
       </header>
       <main className="app-main">
         <div hidden={topTab !== "model"} className="tab-fill">
-          <ModelPanel blockHost={blockHost} editorTab={editorTab} setEditorTab={setEditorTab} model={model} json={json} setJson={setJson} applyJson={applyJson} validation={validation} focusDiagnostic={focusDiagnostic} openHelp={openHelp} />
+          <ModelPanel blockHost={blockHost} editorTab={editorTab} setEditorTab={setEditorTab} showMobileBlockNotice={showMobileBlockNotice} dismissMobileBlockNotice={dismissMobileBlockNotice} model={model} json={json} setJson={setJson} applyJson={applyJson} validation={validation} focusDiagnostic={focusDiagnostic} openHelp={openHelp} />
         </div>
         {topTab === "results" && <ResultPanel model={model} updateModel={(next) => setModelSynced(next)} settings={settings} results={results} running={running} message={message} run={run} />}
         {topTab === "help" && <HelpPanel focusCode={helpCode} />}

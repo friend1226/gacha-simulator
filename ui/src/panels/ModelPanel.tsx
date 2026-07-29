@@ -1,4 +1,4 @@
-import { Activity, Braces, CircleAlert, CircleCheck } from "lucide-react";
+import { Activity, Braces, CircleAlert, CircleCheck, X } from "lucide-react";
 import type { RefObject } from "react";
 import type { Diagnostic, ModelIr, ValidationView } from "../types";
 
@@ -6,6 +6,8 @@ export function ModelPanel({
   blockHost,
   editorTab,
   setEditorTab,
+  showMobileBlockNotice,
+  dismissMobileBlockNotice,
   model,
   json,
   setJson,
@@ -17,6 +19,8 @@ export function ModelPanel({
   blockHost: RefObject<HTMLDivElement>;
   editorTab: "blocks" | "json";
   setEditorTab: (tab: "blocks" | "json") => void;
+  showMobileBlockNotice: boolean;
+  dismissMobileBlockNotice: () => void;
   model: ModelIr;
   json: string;
   setJson: (value: string) => void;
@@ -37,6 +41,12 @@ export function ModelPanel({
           <div className="model-name">{model.name}</div>
         </div>
         <div className={editorTab === "blocks" ? "block-host visible" : "block-host"} ref={blockHost} />
+        {editorTab === "blocks" && showMobileBlockNotice && (
+          <div className="mobile-block-notice" role="note">
+            <span>작은 화면에서는 블록 편집이 불편할 수 있습니다. IR JSON 탭을 쓰거나 큰 화면에서 편집하세요.</span>
+            <button type="button" aria-label="안내 닫기" onClick={dismissMobileBlockNotice}><X size={16} /></button>
+          </div>
+        )}
         {editorTab === "json" && (
           <div className="json-pane">
             <textarea value={json} onChange={(event) => setJson(event.target.value)} spellCheck={false} />
