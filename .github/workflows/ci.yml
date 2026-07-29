@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      # Integration branch: validate every non-documentation push before production.
       - dev
       - "agent/**"
     paths-ignore:
