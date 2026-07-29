@@ -1,0 +1,10 @@
+{
+  "presetSha256": "77a0251a52462a7362541089dc7b56fad2a3f024f04d9cb5cb17977931a45dd5",
+  "resultSha256": "d699c6d19a1384b8ffd5e4c524213829e8a6a09814ba9a65e177238ac6d47588",
+  "numeric": "exact",
+  "trials": 10,
+  "trackedLeafIds": ["star6", "star5", "star4", "star3"],
+  "jointCells": 275,
+  "remainingMass": "1",
+  "hasFirstHit": false
+}

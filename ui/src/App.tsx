@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, FlaskConical, RotateCcw, Save, Settings, Upload } from "lucide-react";
-import { Blockly, installWorkspaceVolume, loadIr, toolbox, workspaceToIr } from "./blockly";
-import { loadEngineBackend, runDpJson } from "./engine";
+import { Blockly, getUnsupportedBlockItems, installWorkspaceVolume, loadIr, toolbox, workspaceToIr, type UnsupportedBlockItem } from "./blockly";
+import { EngineCancelledError, loadEngineBackend, runDpJson, type EngineBackend, type EngineProgress } from "./engine";
+import { parseEngineError, type EngineErrorPresentation } from "./engineDiagnostics";
 import { blueArchive, presets } from "./preset";
 import { loadSettings, normalizeSettings, saveSettings, type AppSettings } from "./settings";
 import { normalizeFirstHit } from "./firstHit";
@@ -28,11 +29,14 @@ function initialModel(): ModelIr {
 export function App() {
   const blockHost = useRef<HTMLDivElement>(null);
   const workspace = useRef<Blockly.WorkspaceSvg>();
+  const engineBackend = useRef<EngineBackend>();
+  const executionId = useRef(0);
   const [model, setModel] = useState<ModelIr>(initialModel);
   const modelRef = useRef(model);
   const [json, setJson] = useState(() => JSON.stringify(model, null, 2));
   const [topTab, setTopTab] = useState<TopTab>("model");
   const [editorTab, setEditorTab] = useState<"blocks" | "json">("blocks");
+  const [unsupportedBlockItems, setUnsupportedBlockItems] = useState<UnsupportedBlockItem[]>([]);
   const [showMobileBlockNotice, setShowMobileBlockNotice] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const settingsRef = useRef(settings);
@@ -40,6 +44,9 @@ export function App() {
   const [helpCode, setHelpCode] = useState<string>();
   const [message, setMessage] = useState("모델을 검증한 뒤 계산 방식을 선택하세요.");
   const [running, setRunning] = useState<"dp" | "mc">();
+  const [canCancel, setCanCancel] = useState(false);
+  const [progress, setProgress] = useState<EngineProgress>();
+  const [engineError, setEngineError] = useState<EngineErrorPresentation>();
   const [results, setResults] = useState<{ dp?: EngineResult; mc?: EngineResult }>({});
   const validation = useMemo(() => validateLocally(model), [model]);
   const hasError = validation.diagnostics.some((item) => item.severity === "error");
@@ -47,6 +54,7 @@ export function App() {
   useEffect(() => {
     modelRef.current = model;
     localStorage.setItem(MODEL_STORAGE, JSON.stringify(model));
+    setEngineError(undefined);
   }, [model]);
   useEffect(() => { settingsRef.current = settings; saveSettings(settings); }, [settings]);
 
@@ -94,12 +102,13 @@ export function App() {
     });
     workspace.current = ws;
     installWorkspaceVolume(ws, () => settingsRef.current.soundVolume);
-    loadIr(ws, modelRef.current);
+    setUnsupportedBlockItems(loadIr(ws, modelRef.current));
     const listener = (event: Blockly.Events.Abstract) => {
       if (event.isUiEvent) return;
       const next = workspaceToIr(ws, modelRef.current);
       setModel(next);
       setJson(JSON.stringify(next, null, 2));
+      setUnsupportedBlockItems(getUnsupportedBlockItems(ws));
     };
     ws.addChangeListener(listener);
     const resize = () => Blockly.svgResize(ws);
@@ -120,7 +129,9 @@ export function App() {
   function setModelSynced(next: ModelIr, reloadBlocks = false) {
     setModel(next);
     setJson(JSON.stringify(next, null, 2));
-    if (reloadBlocks && workspace.current) loadIr(workspace.current, next);
+    if (reloadBlocks && workspace.current) {
+      setUnsupportedBlockItems(loadIr(workspace.current, next));
+    }
   }
 
   function applyJson() {
@@ -172,14 +183,25 @@ export function App() {
       setTopTab("model");
       return;
     }
+    const currentExecution = ++executionId.current;
     setRunning(engine);
+    setCanCancel(false);
+    setProgress(undefined);
+    setEngineError(undefined);
     setMessage(engine === "dp" ? "정확 계산을 실행하는 중…" : "시뮬레이션을 실행하는 중…");
     try {
       const backend = await loadEngineBackend();
+      engineBackend.current = backend;
+      if (currentExecution !== executionId.current) return;
+      setCanCancel(backend.platform === "web");
+      const updateProgress = (next: EngineProgress) => {
+        if (currentExecution === executionId.current) setProgress(next);
+      };
       const source = JSON.stringify(model);
       const execution = engine === "dp"
-        ? await runDpJson(backend, model)
-        : { engine: "MC" as const, json: await backend.runMcJson(source, runs, seed) };
+        ? await runDpJson(backend, model, updateProgress)
+        : { engine: "MC" as const, json: await backend.runMcJson(source, runs, seed, updateProgress) };
+      if (currentExecution !== executionId.current) return;
       const parsed = JSON.parse(execution.json) as Partial<EngineResult>;
       const result: EngineResult = {
         engine: execution.engine === "EXACT" ? "Exact" : execution.engine,
@@ -198,16 +220,38 @@ export function App() {
         modelHash: parsed.modelHash,
       };
       setResults((current) => engine === "mc" ? { ...current, mc: result } : { ...current, dp: result });
+      setEngineError(undefined);
       setMessage(`${engine === "dp" ? "정확 계산" : "시뮬레이션"} 완료 · ${result.joint.length.toLocaleString()}개 결과 셀 · ${result.elapsedMs}ms`);
       setTopTab("results");
     } catch (error) {
+      if (error instanceof EngineCancelledError || currentExecution !== executionId.current) return;
       const text = String(error);
-      setMessage(text.includes("dynamically imported module") || text.includes("Cannot find module")
-        ? "WASM 패키지가 없습니다. 루트에서 wasm-pack build 명령을 실행하세요."
-        : `실행 오류: ${text}`);
+      if (text.includes("dynamically imported module") || text.includes("Cannot find module")) {
+        setEngineError(undefined);
+        setMessage("WASM 패키지가 없습니다. 루트에서 wasm-pack build 명령을 실행하세요.");
+      } else {
+        const presentation = parseEngineError(text);
+        setEngineError(presentation.diagnostics.length ? presentation : undefined);
+        setMessage(presentation.diagnostics.length ? "엔진 진단을 확인하세요." : `실행 오류: ${text}`);
+      }
     } finally {
-      setRunning(undefined);
+      if (currentExecution === executionId.current) {
+        setRunning(undefined);
+        setCanCancel(false);
+        setProgress(undefined);
+      }
     }
+  }
+
+  function cancelRun() {
+    if (!running || !canCancel) return;
+    executionId.current += 1;
+    engineBackend.current?.cancel();
+    setRunning(undefined);
+    setCanCancel(false);
+    setProgress(undefined);
+    setEngineError(undefined);
+    setMessage("계산을 취소했습니다.");
   }
 
   function saveModel() {
@@ -248,9 +292,9 @@ export function App() {
       </header>
       <main className="app-main">
         <div hidden={topTab !== "model"} className="tab-fill">
-          <ModelPanel blockHost={blockHost} editorTab={editorTab} setEditorTab={setEditorTab} showMobileBlockNotice={showMobileBlockNotice} dismissMobileBlockNotice={dismissMobileBlockNotice} model={model} json={json} setJson={setJson} applyJson={applyJson} validation={validation} focusDiagnostic={focusDiagnostic} openHelp={openHelp} />
+          <ModelPanel blockHost={blockHost} editorTab={editorTab} setEditorTab={setEditorTab} showMobileBlockNotice={showMobileBlockNotice} dismissMobileBlockNotice={dismissMobileBlockNotice} unsupportedBlockItems={unsupportedBlockItems} model={model} json={json} setJson={setJson} applyJson={applyJson} validation={validation} focusDiagnostic={focusDiagnostic} openHelp={openHelp} />
         </div>
-        {topTab === "results" && <ResultPanel model={model} updateModel={(next) => setModelSynced(next)} settings={settings} results={results} running={running} message={message} run={run} />}
+        {topTab === "results" && <ResultPanel model={model} updateModel={(next) => setModelSynced(next)} settings={settings} results={results} running={running} canCancel={canCancel} progress={progress} engineError={engineError} message={message} run={run} cancelRun={cancelRun} openHelp={openHelp} />}
         {topTab === "help" && <HelpPanel focusCode={helpCode} />}
         {topTab === "settings" && <SettingsPanel settings={settings} update={updateSettings} />}
       </main>

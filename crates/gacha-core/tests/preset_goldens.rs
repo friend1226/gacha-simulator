@@ -156,3 +156,60 @@ fn simple_pity_matches_golden() {
         include_str!("../../../presets/golden/simple-pity.json"),
     );
 }
+
+#[test]
+fn arknights_first_ten_guarantee_matches_golden() {
+    assert_exact_golden(
+        include_str!("../../../presets/arknights-first-ten-guarantee.json"),
+        include_str!("../../../presets/golden/arknights-first-ten-guarantee.json"),
+    );
+}
+
+#[test]
+fn arknights_first_ten_guarantee_invariants_hold() {
+    let source = include_str!("../../../presets/arknights-first-ten-guarantee.json");
+    let ir: ModelIr = serde_json::from_str(source).expect("preset must deserialize");
+    let model = compile(&ir).expect("preset must compile");
+    let result =
+        run_exact(&model, ExactOptions::default(), |_, _| true).expect("preset exact DP must run");
+    let star6 = result
+        .tracked_leaf_ids
+        .iter()
+        .position(|id| id == "star6")
+        .expect("star6 must be tracked");
+    let star5 = result
+        .tracked_leaf_ids
+        .iter()
+        .position(|id| id == "star5")
+        .expect("star5 must be tracked");
+
+    let no_high_rarity_numerator: BigInt = result
+        .joint
+        .iter()
+        .filter(|cell| cell.counts[star6] == 0 && cell.counts[star5] == 0)
+        .map(|cell| cell.numerator.parse::<BigInt>().expect("exact numerator"))
+        .sum();
+    assert_eq!(
+        no_high_rarity_numerator,
+        BigInt::from(0),
+        "Arknights first-ten guarantee broke: P(no 5-star or 6-star) must be exactly zero",
+    );
+
+    assert!(
+        result
+            .joint
+            .iter()
+            .all(|cell| cell.counts.iter().sum::<u32>() == 10),
+        "Arknights first-ten guarantee broke: every result cell must contain exactly 10 pulls",
+    );
+
+    let expected_star6 = result
+        .joint
+        .iter()
+        .map(|cell| cell.counts[star6] as f64 * cell.probability)
+        .sum::<f64>();
+    assert!(
+        (expected_star6 - 0.269_735_688_02).abs() < 1e-12,
+        "Arknights first-ten guarantee broke: E[6-star]={expected_star6:.14}, expected 0.26973568802",
+    );
+}

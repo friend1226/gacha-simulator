@@ -16,6 +16,7 @@ license = "MIT"
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 getrandom = { version = "0.2", features = ["js"] }
+js-sys = "0.3"
 num-bigint = { version = "0.4", features = ["serde"] }
 num-integer = "0.1"
 num-rational = { version = "0.4", features = ["serde", "num-bigint"] }

@@ -36,6 +36,12 @@ button { cursor: pointer; }
 .apply { position: absolute; right: 30px; top: 30px; padding: 8px 12px; border: 0; border-radius: 7px; background: #6c5ce7; }
 .validation-panel { min-width: 0; overflow: auto; border-left: 1px solid #262b36; background: #151820; }
 .aside-title { height: 49px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid #282e3a; font-size: 13px; font-weight: 600; }
+.unsupported-block-warning { margin: 12px; padding: 12px; border: 1px solid #705d2d; border-radius: 8px; background: #282315; color: #d9c786; font-size: 11px; line-height: 1.5; }
+.unsupported-block-warning b, .unsupported-block-warning span { display: block; }
+.unsupported-block-warning span { margin-top: 4px; color: #b8ad86; }
+.unsupported-block-warning ul { margin: 8px 0; padding-left: 18px; }
+.unsupported-block-warning code { color: #e4d59c; }
+.unsupported-block-warning button { display: flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #705d2d; border-radius: 6px; background: #332c1b; }
 .status { font-size: 11px; padding: 3px 8px; border-radius: 999px; }
 .status.good { color: #65d6a4; background: #18352c; }
 .status.bad { color: #ff8796; background: #3b2027; }
@@ -84,8 +90,19 @@ button { cursor: pointer; }
 .run-buttons { display: flex; gap: 7px; }
 .run-buttons button { height: 35px; display: flex; align-items: center; gap: 5px; padding: 0 12px; border: 0; border-radius: 7px; background: #725be2; white-space: nowrap; }
 .run-buttons .secondary { background: #28765b; }
+.run-buttons .cancel { background: #8a3e50; }
 .run-buttons button:disabled { opacity: .45; cursor: wait; }
 .run-toolbar p { grid-column: 1 / -1; margin: 0; color: #727c8e; font-size: 11px; }
+.run-progress { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; color: #9ba4b5; font: 11px "IBM Plex Mono", monospace; }
+.run-progress progress { width: min(420px, 70%); height: 8px; accent-color: #725be2; }
+.engine-diagnostics { grid-column: 1 / -1; padding: 14px; border: 1px solid #754b56; border-radius: 10px; background: #2a1d22; }
+.engine-diagnostics h2 { margin: 0 0 10px; font-size: 14px; }
+.engine-diagnostics ul { margin: 0; padding-left: 20px; }
+.engine-diagnostics li { margin: 8px 0; }
+.engine-diagnostics li span { display: block; margin: 3px 0; color: #d7ccd0; }
+.engine-diagnostics li button { padding: 4px 8px; }
+.engine-diagnostics details { margin-top: 10px; }
+.engine-diagnostics pre { overflow: auto; white-space: pre-wrap; color: #c5bac0; }
 .track-picker { margin: 10px 0 18px; padding: 10px 14px; border: 1px solid #292f3b; border-radius: 8px; color: #9da6b6; font-size: 12px; }
 .track-picker div { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .track-picker label { padding: 5px 8px; background: #1b202a; border-radius: 6px; }
