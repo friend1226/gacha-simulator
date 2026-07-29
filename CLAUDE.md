@@ -14,7 +14,7 @@
 ```bash
 # Rust
 cargo build --workspace
-cargo test --workspace
+cargo test --workspace --exclude gacha-tauri   # gacha-tauri는 Linux에서 GTK/WebKit 필요. CI도 이 형태
 cargo run -p gacha-cli -- validate presets/blue-archive-pickup.json
 cargo run -p gacha-cli -- dp      presets/blue-archive-pickup.json
 cargo run -p gacha-cli -- exact   presets/simple-pity.json
@@ -35,15 +35,22 @@ crates/gacha-core/src/
   numeric.rs     Prob trait + F64 / ScaledF64 (mantissa f64 + exponent i64)
   ir.rs          Model IR v1/v2 역직렬화
   expr.rs        표현식 AST → 스택 바이트코드, 유리수 평가
+  state.rs       StateCodec 혼합기수 u64 패킹 (제어 / 집계 / 리프 카운트 3구획)
   compile.rs     엔티티 트리 → 배타적 리프, 확률표 사전계산, 진단, 전이/트리거
   engine_mc.rs   xoshiro256++ + alias sampling + Wilson 구간
   engine_dp.rs   희소 DP, Prob에 대해 제네릭
   engine_exact.rs 레이어 공통분모 + BigInt 분자
+  snapshot.rs    GCHS 스냅샷 (aggregate 기본, full은 명시 확인)
   report.rs      집계
-crates/gacha-cli/   validate / dp / exact / mc
-crates/gacha-wasm/  JSON in/out API
-ui/src/             Blockly IR 편집기 + 검증 패널 + 결과 표
+crates/gacha-cli/   validate / dp / exact / mc / snapshot
+crates/gacha-wasm/  JSON in/out API (진행 콜백 변형 포함)
+crates/gacha-tauri/ 데스크톱 셸. 네이티브 IPC로 코어 직접 호출
+ui/src/             Blockly IR 편집기 + 검증 패널 + 결과 피벗 + 도움말/설정
+  engine.worker.ts  웹 계산 Worker (진행률·취소). Tauri는 이 경로를 쓰지 않는다
+  provenance.ts     모델 출처 pristine / dirty / none 추적
+  pivot.ts          결과 피벗·집계 (BigInt 10진 합산으로 극소 확률 보존)
 presets/            게임별 Model IR (코드 하드코딩 금지)
+presets/golden/     프리셋별 결과 SHA-256 골든
 ```
 
 ---
@@ -65,20 +72,38 @@ presets/            게임별 Model IR (코드 하드코딩 금지)
 
 ---
 
-## 지금 할 일 (순서 고정)
+## 현재 상태 (2026-07-30)
 
-M8 성능·스냅샷 작업과 M9 집계 변수·결과 UI·Netlify 배포까지 완료됐다. 현재 기준
-회귀선은 Rust 53개와 UI 11개 테스트이며, 프리셋 골든 `resultSha256`은 유지해야 한다.
-다음 작업은 아래 순서로 진행한다.
+M8 성능·스냅샷, M9 집계 변수·결과 UI, Netlify 프로덕션 배포까지 끝났고 이후 다음이
+들어왔다. 세부 검증 기록은 `docs/STATUS.md`에 있다.
 
-1. 웹 계산을 Web Worker로 옮기고 취소·진행률을 제공한다. Tauri 네이티브 IPC 경로와
-   `ui/public/wasm` 배치는 유지한다.
-2. 엔진 진단을 한국어 안내와 연결하고, `W009`/`E010` 중복 및 실시간 집계 테이블
-   사전 경고를 정리한다.
-3. 공식 출처가 확인된 서로 다른 메커니즘의 프리셋을 추가한다. 확인할 수 없는 확률이나
-   규칙은 만들지 않는다.
+- 웹 계산이 모듈 Worker에서 돌고 진행률·취소를 제공한다. Tauri는 네이티브 IPC 경로를
+  그대로 쓰며 진행률·취소가 없다
+- 엔진 진단이 한국어 제목·해결 방법과 도움말 탭으로 연결된다. 영문 원문은 접이식으로
+  보존된다
+- 집계 변수 테이블 크기를 실시간 검증 패널이 사전 경고한다 (`W009` / `E010`)
+- Blockly 편집기가 표현하지 못하는 IR 규칙을 삭제하지 않고 보존하며 안내한다.
+  `presets/` 전체에 대한 왕복 충실도 회귀 테스트가 이를 고정한다
+- 모델 출처를 `pristine` / `dirty` / `none`으로 추적한다. 편집된 모델을 내보낼 때
+  `$preset` 메타데이터를 제거한다
+- 프리셋 3종(Blue Archive 픽업, Arknights 10연 보장, 일반 하드 천장)과 골든 3종
 
-각 단계는 `docs/DESIGN.md` §13과 `docs/STATUS.md`에 검증 결과를 기록한다.
+**회귀선: Rust 55개, UI 29개.** 프리셋 골든 `resultSha256` 3개는 유지해야 한다.
+`irVersion`은 2다.
+
+## 다음 후보 (소유자 판단 대기)
+
+- **MC 다중 워커.** 조사 완료. 고정 RNG 스트림 단위 shard + 중앙 finalizer면 워커 수와
+  무관한 재현성이 보장된다. 단순 run 분할은 스트림 중복으로 금지. `clampEvents`는
+  정적 값이라 합산 대상이 아니고 `accumulatorClampEvents`만 합산한다. DP·Exact는 제외
+- **Tauri 인스톨러 (M10).** 조사 완료. Windows x64 NSIS를 workflow artifact로만 만드는
+  1단계를 권고. 서명·Release 게시는 소유자 결정 사항
+- **Arknights 확률 공시 확인.** 보장 슬롯 6★/5★ 비율(현재 2/98 해석)과 보장 범위가
+  미확정. 확정되면 프리셋과 불변식 테스트를 갱신한다
+- **프리셋 추가.** 블록 편집기로 보장 규칙까지 표현되므로 이전보다 비용이 낮다.
+  출처·메커니즘 사전 보고와 소유자 승인 절차는 유지한다
+
+각 작업은 `docs/DESIGN.md` §13과 `docs/STATUS.md`에 검증 결과를 기록한다.
 
 ---
 

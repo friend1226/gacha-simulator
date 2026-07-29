@@ -3,9 +3,14 @@
 블록 기반 모델 IR로 가챠 규칙을 정의하고 몬테카를로 및 마르코프 DP로 확률을 계산하는 프로젝트입니다.
 
 현재 구현은 Rust 코어/CLI/WASM API/Tauri 데스크톱 셸, 정확 리터럴 파서, 엔티티→배타적
-리프 컴파일, 동적 제어상태·전이·트리거, MC/DP/공통분모 BigInt exact DP(모두 Rayon
-병렬화), Wilson 구간, GCHS 스냅샷, Blockly 기반 IR 편집기를 포함합니다. Web Worker
-병렬 실행과 Tauri 인스톨러/다중 플랫폼 빌드는 후속 마일스톤입니다 (`docs/STATUS.md`).
+리프 컴파일, 동적 제어상태·전이·트리거, 집계 변수, MC/DP/공통분모 BigInt exact
+DP(네이티브는 Rayon 병렬화), Wilson 구간, GCHS 스냅샷, Blockly 기반 IR 편집기,
+결과 피벗·차트를 포함합니다. 웹 계산은 모듈 Worker에서 실행되며 진행률과 취소를
+제공하고, 엔진 진단은 한국어 해결 방법과 연결됩니다.
+
+후속 마일스톤은 **MC 다중 워커 병렬화**(현재 웹은 워커 1개라 단일 스레드)와
+**Tauri 인스톨러/다중 플랫폼 빌드**입니다. 둘 다 사전 조사가 끝나 있습니다
+(`docs/STATUS.md`, `docs/DESIGN.md` §13.1).
 
 ## 사전 준비
 
@@ -53,11 +58,13 @@ npm run dev
 ```
 
 `http://localhost:5173`에서 모델/결과/도움말/설정 탭, 컨테이너형 Blockly 편집기,
-피벗 히트맵과 시행·첫 달성 차트를 쓸 수 있습니다.
+프리셋 3종(Blue Archive 픽업 · Arknights 10연 보장 · 일반 하드 천장), 피벗 히트맵과
+시행·첫 달성 차트를 쓸 수 있습니다.
 
 > **주의**: Vite 개발 서버는 `public/` 자산을 소스 코드에서 동적 import하는 것을
-> 허용하지 않아서, `npm run dev`에서는 "DP 실행"/"MC 실행" 버튼이 동작하지
-> 않습니다. 계산까지 확인하려면 `npm run build && npm run preview`를 쓰세요.
+> 허용하지 않아서, `npm run dev`에서는 계산 버튼("정확 계산"/"시뮬레이션")이 동작하지
+> 않습니다. WASM을 이미 빌드해 뒀더라도 "WASM 패키지가 없습니다"라고 표시됩니다.
+> 계산까지 확인하려면 `npm run build && npm run preview`를 쓰세요.
 
 ## Netlify 배포
 
