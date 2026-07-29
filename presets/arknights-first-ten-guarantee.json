@@ -1,14 +1,14 @@
 {
   "$preset": {
     "game": "Arknights",
-    "banner": "Standard Headhunting 첫 10회 보장",
+    "banner": "10연 5★ 이상 보장",
     "sourceUrl": "https://arknights.wiki.gg/wiki/Headhunting",
     "verifiedDate": "2026-07-29",
     "confidence": "community-estimate",
-    "notes": "위키 원문: \"A 5★ (at minimum) Operator is guaranteed to appear in any of the first ten pulls.\" 이 프리셋은 첫 10회 보장만 모델링하며 maxTrials=10 전용이다. 시행 횟수를 10보다 크게 늘리면 실제와 다르다. 50회 이후 6★ 소프트 천장은 포함하지 않는다. 보장 슬롯의 6★/5★ 20/80은 기본 확률 2:8 재정규화 추정이다. 5★ 확정으로 가정하면 E[6★]=0.1922516이므로 이 가정이 결과를 가른다."
+    "notes": "위키 원문: \"A 5★ (at minimum) Operator is guaranteed to appear in any of the first ten pulls.\" 보장 슬롯은 3★·4★ 확률을 5★가 흡수하고 6★은 별도 천장 확률을 유지한다고 해석해, 첫 10회에 5★·6★가 없으면 10번째를 6★ 2%, 5★ 98%로 둔다. 근거는 (1) 위키의 실효 6★ 약 3% 서술이 소프트 천장 문단에 귀속되고, (2) 위키가 10연 보장으로 6★ 확률이 오른다고 말하지 않으며, (3) 6★ 확률이 100%인 극단에는 남은 5★ 확률이 0%가 되는 구조와 맞기 때문이다. 이전 버전의 출처 없는 대안은 기본 2:8 비례 재분배(20/80)였고 이 경우 E[6★]=0.269735688이다. 보장이 매 10연마다인지 최초 10연 1회인지, 이벤트 보상 형태인지 확인되지 않았다. 이 프리셋은 maxTrials=10 전용이며 시행 횟수를 10보다 크게 늘리면 실제와 다르다. 50회 이후 6★ 소프트 천장은 포함하지 않는다."
   },
   "irVersion": 2,
-  "name": "Arknights Standard Headhunting 첫 10회 보장",
+  "name": "Arknights 10연 5★ 이상 보장",
   "entities": [
     { "id": "star6", "name": "6★", "prob": { "lit": "0.02" } },
     { "id": "star5", "name": "5★", "prob": { "lit": "0.08" } },
@@ -29,7 +29,7 @@
             { "eq": [{ "var": "highSeen" }, { "lit": "0" }] }
           ]
         },
-        "then": { "lit": "0.2" },
+        "then": { "lit": "0.02" },
         "else": { "lit": "0.02" }
       }
     },
@@ -42,7 +42,7 @@
             { "eq": [{ "var": "highSeen" }, { "lit": "0" }] }
           ]
         },
-        "then": { "lit": "0.8" },
+        "then": { "lit": "0.98" },
         "else": { "lit": "0.08" }
       }
     },

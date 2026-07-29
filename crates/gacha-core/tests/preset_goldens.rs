@@ -208,8 +208,19 @@ fn arknights_first_ten_guarantee_invariants_hold() {
         .iter()
         .map(|cell| cell.counts[star6] as f64 * cell.probability)
         .sum::<f64>();
+    // The first-ten guarantee must not change the 6-star expectation: 10 pulls × base 2%.
     assert!(
-        (expected_star6 - 0.269_735_688_02).abs() < 1e-12,
-        "Arknights first-ten guarantee broke: E[6-star]={expected_star6:.14}, expected 0.26973568802",
+        (expected_star6 - 0.2).abs() < 1e-12,
+        "Arknights first-ten guarantee broke: E[6-star]={expected_star6:.14}, expected 0.2",
+    );
+
+    let expected_star5 = result
+        .joint
+        .iter()
+        .map(|cell| cell.counts[star5] as f64 * cell.probability)
+        .sum::<f64>();
+    assert!(
+        (expected_star5 - 1.148_678_440_1).abs() < 1e-12,
+        "Arknights first-ten guarantee broke: E[5-star]={expected_star5:.14}, expected 1.1486784401",
     );
 }
