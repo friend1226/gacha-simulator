@@ -18,6 +18,7 @@ import { SettingsPanel } from "./panels/SettingsPanel";
 type TopTab = "model" | "results" | "help" | "settings";
 const MODEL_STORAGE = "gacha-lab.model.v2";
 const MOBILE_BLOCK_NOTICE_STORAGE = "gacha-lab.mobile-block-notice.dismissed";
+const MOBILE_LAYOUT_CSS_FLAG = "--gacha-mobile-layout";
 
 function initialModel(): { model: ModelIr; provenance: ModelProvenance; selectedPreset: string } {
   try {
@@ -75,7 +76,6 @@ export function App() {
       setShowMobileBlockNotice(false);
       return;
     }
-    const media = window.matchMedia("(max-width: 620px)");
     const updateNotice = () => {
       let dismissed = false;
       try {
@@ -83,11 +83,14 @@ export function App() {
       } catch {
         // Keep the notice available when persistent storage is unavailable.
       }
-      setShowMobileBlockNotice(media.matches && !dismissed);
+      const mobileLayout = getComputedStyle(document.documentElement)
+        .getPropertyValue(MOBILE_LAYOUT_CSS_FLAG)
+        .trim() === "1";
+      setShowMobileBlockNotice(mobileLayout && !dismissed);
     };
     updateNotice();
-    media.addEventListener("change", updateNotice);
-    return () => media.removeEventListener("change", updateNotice);
+    window.addEventListener("resize", updateNotice);
+    return () => window.removeEventListener("resize", updateNotice);
   }, [editorTab]);
 
   useEffect(() => {
