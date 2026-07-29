@@ -69,11 +69,17 @@ Blockly.common.defineBlocksWithJsonArray([
   },
   {
     type: "soft_pity_rule",
-    message0: "%1 확률: %2가 %3 이상이면 기본 %4 + 초과당 %5",
+    message0: "%1 확률: %2가 %3 이상이면 %4 %5 / 기본 %6 / 증가량 %7",
     args0: [
       { type: "field_input", name: "TARGET", text: "star3" },
       { type: "field_input", name: "VAR", text: "pity" },
       { type: "field_number", name: "THRESHOLD", value: 65, min: 0, precision: 1 },
+      {
+        type: "field_dropdown",
+        name: "MODE",
+        options: [["선형 증가", "ramp"], ["확정값", "literal"]],
+      },
+      { type: "field_input", name: "THEN", text: "1" },
       { type: "field_input", name: "BASE", text: "0.03" },
       { type: "field_input", name: "STEP", text: "0.03" },
     ],
@@ -83,10 +89,20 @@ Blockly.common.defineBlocksWithJsonArray([
   },
   {
     type: "transition_set",
-    message0: "%1가 나오면 %2 = %3",
+    message0: "%1가 %2 %3를 %4 %5",
     args0: [
       { type: "field_input", name: "ENTITY", text: "star3" },
+      {
+        type: "field_dropdown",
+        name: "PREDICATE",
+        options: [["나오면", "leafOf"], ["나오지 않으면", "notLeafOf"]],
+      },
       { type: "field_input", name: "VAR", text: "pity" },
+      {
+        type: "field_dropdown",
+        name: "SET_MODE",
+        options: [["대입", "literal"], ["현재값 +", "add"]],
+      },
       { type: "field_input", name: "VALUE", text: "0" },
     ],
     previousStatement: null,
@@ -111,6 +127,11 @@ Blockly.common.defineBlocksWithJsonArray([
       { type: "field_number", name: "TRIAL", value: 200, min: 1, precision: 1 },
       { type: "field_input", name: "LEAF", text: "pickup" },
       { type: "field_number", name: "AMOUNT", value: 1, min: 1, precision: 1 },
+    ],
+    message1: "시행 1회 소모 %1 · 전이 적용 %2",
+    args1: [
+      { type: "field_checkbox", name: "CONSUMES", checked: false },
+      { type: "field_checkbox", name: "APPLIES", checked: true },
     ],
     previousStatement: null,
     nextStatement: null,
@@ -139,6 +160,61 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
   ],
 };
 
+export interface UnsupportedBlockItem {
+  path: string;
+  description: string;
+}
+
+interface PreservedItem<T> {
+  index: number;
+  value: T;
+}
+
+interface WorkspaceRoundTripState {
+  entities: PreservedItem<Entity>[];
+  stateVars: PreservedItem<ModelIr["stateVars"][number]>[];
+  probRules: PreservedItem<unknown>[];
+  transitions: PreservedItem<unknown>[];
+  triggers: PreservedItem<unknown>[];
+  condition?: Expr;
+}
+
+interface ProbRuleBlockData {
+  target: string;
+  variable: string;
+  threshold: string;
+  base: string;
+  mode: "ramp" | "literal";
+  then: string;
+  step: string;
+}
+
+interface TransitionBlockData {
+  entity: string;
+  predicate: "leafOf" | "notLeafOf";
+  variable: string;
+  mode: "literal" | "add";
+  value: string;
+}
+
+interface TriggerBlockData {
+  trial: number;
+  leaf: string;
+  amount: number;
+  consumesTrial: boolean;
+  appliesTransitions: boolean;
+}
+
+const roundTripState = new WeakMap<Blockly.Workspace, WorkspaceRoundTripState>();
+
+function mergePreserved<T>(supported: T[], preserved: PreservedItem<T>[]): T[] {
+  const result = [...supported];
+  for (const item of [...preserved].sort((left, right) => left.index - right.index)) {
+    result.splice(Math.min(item.index, result.length), 0, structuredClone(item.value));
+  }
+  return result;
+}
+
 function chain(first: Blockly.Block | null): Blockly.Block[] {
   const result: Blockly.Block[] = [];
   let block = first;
@@ -150,20 +226,31 @@ function chain(first: Blockly.Block | null): Blockly.Block[] {
 }
 
 function readEntity(block: Blockly.Block): Entity {
+  const children = chain(block.getInputTargetBlock("CHILDREN")).map(readEntity);
   return {
     id: block.getFieldValue("ID"),
     name: block.getFieldValue("NAME"),
     prob: { lit: String(block.getFieldValue("PROB")) },
     blockId: block.id,
-    children: chain(block.getInputTargetBlock("CHILDREN")).map(readEntity),
+    ...(children.length ? { children } : {}),
   };
 }
 
-export function workspaceToIr(workspace: Blockly.WorkspaceSvg, previous: ModelIr): ModelIr {
+export function workspaceToIr(workspace: Blockly.Workspace, previous: ModelIr): ModelIr {
   const root = workspace.getTopBlocks(true).find((block) => block.type === "model_container");
   if (!root) return previous;
-  const entities = chain(root.getInputTargetBlock("ENTITIES")).map(readEntity);
-  const stateVars: ModelIr["stateVars"] = chain(root.getInputTargetBlock("STATE")).map((block) => {
+  const preserved = roundTripState.get(workspace) ?? {
+    entities: [],
+    stateVars: [],
+    probRules: [],
+    transitions: [],
+    triggers: [],
+  };
+  const entities = mergePreserved(
+    chain(root.getInputTargetBlock("ENTITIES")).map(readEntity),
+    preserved.entities,
+  );
+  const stateVars = mergePreserved(chain(root.getInputTargetBlock("STATE")).map((block) => {
     if (block.type === "accumulator_variable") {
       const id = String(block.getFieldValue("ID"));
       return {
@@ -187,38 +274,52 @@ export function workspaceToIr(workspace: Blockly.WorkspaceSvg, previous: ModelIr
       role: "control" as const,
       blockId: block.id,
     };
-  });
-  const probRules = chain(root.getInputTargetBlock("PROB_RULES")).map((block) => {
+  }), preserved.stateVars);
+  const probRules = mergePreserved(chain(root.getInputTargetBlock("PROB_RULES")).map((block) => {
     const target = block.getFieldValue("TARGET");
     const variable = block.getFieldValue("VAR");
     const threshold = String(block.getFieldValue("THRESHOLD"));
     const base = String(block.getFieldValue("BASE"));
     const step = String(block.getFieldValue("STEP"));
+    const mode = block.getFieldValue("MODE");
     return {
       target,
       expr: {
         if: { ge: [{ var: variable }, { lit: threshold }] },
-        then: { add: [{ lit: base }, { mul: [{ lit: step }, { sub: [{ var: variable }, { lit: threshold }] }] }] },
+        then: mode === "literal"
+          ? { lit: String(block.getFieldValue("THEN")) }
+          : { add: [{ lit: base }, { mul: [{ lit: step }, { sub: [{ var: variable }, { lit: threshold }] }] }] },
         else: { lit: base },
       },
       blockId: block.id,
     };
-  });
-  const transitions = chain(root.getInputTargetBlock("TRANSITIONS")).map((block) => ({
-    when: { leafOf: block.getFieldValue("ENTITY") },
-    set: { [block.getFieldValue("VAR")]: { lit: String(block.getFieldValue("VALUE")) } },
-    blockId: block.id,
-  }));
-  const triggers = chain(root.getInputTargetBlock("TRIGGERS")).map((block) => ({
+  }), preserved.probRules);
+  const transitions = mergePreserved(chain(root.getInputTargetBlock("TRANSITIONS")).map((block) => {
+    const entity = block.getFieldValue("ENTITY");
+    const variable = block.getFieldValue("VAR");
+    const value = String(block.getFieldValue("VALUE"));
+    return {
+      when: block.getFieldValue("PREDICATE") === "notLeafOf"
+        ? { not: { leafOf: entity } }
+        : { leafOf: entity },
+      set: {
+        [variable]: block.getFieldValue("SET_MODE") === "add"
+          ? { add: [{ var: variable }, { lit: value }] }
+          : { lit: value },
+      },
+      blockId: block.id,
+    };
+  }), preserved.transitions);
+  const triggers = mergePreserved(chain(root.getInputTargetBlock("TRIGGERS")).map((block) => ({
     at: { trialCount: Number(block.getFieldValue("TRIAL")) },
     grant: {
       leaf: block.getFieldValue("LEAF"),
       amount: Number(block.getFieldValue("AMOUNT")),
-      consumesTrial: false,
-      appliesTransitions: true,
+      consumesTrial: block.getFieldValue("CONSUMES") === "TRUE",
+      appliesTransitions: block.getFieldValue("APPLIES") === "TRUE",
     },
     blockId: block.id,
-  }));
+  })), preserved.triggers);
   const conditionBlock = root.getInputTargetBlock("CONDITION");
   let condition: Expr | undefined;
   if (conditionBlock) {
@@ -232,6 +333,7 @@ export function workspaceToIr(workspace: Blockly.WorkspaceSvg, previous: ModelIr
   }
   const run = { ...previous.run };
   if (condition) run.condition = condition;
+  else if (preserved.condition) run.condition = structuredClone(preserved.condition);
   else delete run.condition;
   return {
     ...previous,
@@ -245,15 +347,16 @@ export function workspaceToIr(workspace: Blockly.WorkspaceSvg, previous: ModelIr
   };
 }
 
-function createBlock(workspace: Blockly.WorkspaceSvg, type: string): Blockly.BlockSvg {
-  const block = workspace.newBlock(type) as Blockly.BlockSvg;
-  block.initSvg();
-  block.render();
+function createBlock(workspace: Blockly.Workspace, type: string): Blockly.Block {
+  const block = workspace.newBlock(type);
+  const svg = block as Blockly.BlockSvg;
+  if (typeof svg.initSvg === "function") svg.initSvg();
+  if (typeof svg.render === "function") svg.render();
   return block;
 }
 
-function append(input: Blockly.Input | null, blocks: Blockly.BlockSvg[]) {
-  let previous: Blockly.BlockSvg | undefined;
+function append(input: Blockly.Input | null, blocks: Blockly.Block[]) {
+  let previous: Blockly.Block | undefined;
   for (const block of blocks) {
     if (!previous) input?.connection?.connect(block.previousConnection!);
     else previous.nextConnection?.connect(block.previousConnection!);
@@ -261,7 +364,7 @@ function append(input: Blockly.Input | null, blocks: Blockly.BlockSvg[]) {
   }
 }
 
-function makeEntity(workspace: Blockly.WorkspaceSvg, entity: Entity): Blockly.BlockSvg {
+function makeEntity(workspace: Blockly.Workspace, entity: Entity): Blockly.Block {
   const block = createBlock(workspace, "entity_definition");
   block.setFieldValue(entity.name, "NAME");
   block.setFieldValue(entity.id, "ID");
@@ -270,83 +373,238 @@ function makeEntity(workspace: Blockly.WorkspaceSvg, entity: Entity): Blockly.Bl
   return block;
 }
 
-function simpleLiteral(value: unknown, fallback = "0"): string {
-  if (!value || typeof value !== "object") return fallback;
+function literalValue(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
   const literal = (value as { lit?: unknown }).lit;
-  return typeof literal === "string" ? literal : fallback;
+  return typeof literal === "string" ? literal : undefined;
 }
 
-export function loadIr(workspace: Blockly.WorkspaceSvg, ir: ModelIr) {
+function supportedEntity(entity: Entity): boolean {
+  return literalValue(entity.prob) !== undefined
+    && (entity.children ?? []).every(supportedEntity);
+}
+
+function accumulatorBlockData(variable: ModelIr["stateVars"][number]) {
+  if (variable.role !== "accumulator"
+    || variable.clampPolicy === "error"
+    || variable.update?.length !== 1) return undefined;
+  const update = variable.update[0];
+  const target = typeof update.when.leafOf === "string" ? update.when.leafOf : undefined;
+  const add = update.set.add;
+  if (!target || !Array.isArray(add) || add.length !== 2) return undefined;
+  const isSelf = (value: unknown) => Boolean(value && typeof value === "object"
+    && (value as Record<string, unknown>).var === variable.id);
+  const amount = isSelf(add[0]) ? literalValue(add[1])
+    : isSelf(add[1]) ? literalValue(add[0]) : undefined;
+  if (amount === undefined || !Number.isFinite(Number(amount)) || String(Number(amount)) !== amount) return undefined;
+  return { target, amount };
+}
+
+function probRuleBlockData(rule: unknown): ProbRuleBlockData | undefined {
+  if (!rule || typeof rule !== "object") return undefined;
+  const record = rule as Record<string, unknown>;
+  const target = typeof record.target === "string" ? record.target : undefined;
+  const expr = record.expr as Record<string, unknown> | undefined;
+  const condition = expr?.if as Record<string, unknown> | undefined;
+  const ge = condition?.ge;
+  if (!target || !Array.isArray(ge) || ge.length !== 2) return undefined;
+  const variable = ge[0] && typeof ge[0] === "object"
+    ? (ge[0] as Record<string, unknown>).var : undefined;
+  const threshold = literalValue(ge[1]);
+  const base = literalValue(expr?.else);
+  if (typeof variable !== "string" || threshold === undefined || base === undefined) return undefined;
+
+  const literalThen = literalValue(expr?.then);
+  if (literalThen !== undefined) {
+    return { target, variable, threshold, base, mode: "literal", then: literalThen, step: "0" };
+  }
+  const then = expr?.then as Record<string, unknown> | undefined;
+  const add = then?.add;
+  if (!Array.isArray(add) || add.length !== 2 || literalValue(add[0]) !== base) return undefined;
+  const mul = add[1] && typeof add[1] === "object"
+    ? (add[1] as Record<string, unknown>).mul : undefined;
+  if (!Array.isArray(mul) || mul.length !== 2) return undefined;
+  const step = literalValue(mul[0]);
+  const sub = mul[1] && typeof mul[1] === "object"
+    ? (mul[1] as Record<string, unknown>).sub : undefined;
+  if (!step || !Array.isArray(sub) || sub.length !== 2) return undefined;
+  const subVariable = sub[0] && typeof sub[0] === "object"
+    ? (sub[0] as Record<string, unknown>).var : undefined;
+  if (subVariable !== variable || literalValue(sub[1]) !== threshold) return undefined;
+  return { target, variable, threshold, base, mode: "ramp", then: base, step };
+}
+
+function transitionBlockData(transition: unknown): TransitionBlockData | undefined {
+  if (!transition || typeof transition !== "object") return undefined;
+  const record = transition as Record<string, unknown>;
+  const when = record.when as Record<string, unknown> | undefined;
+  let entity: unknown = when?.leafOf;
+  let predicate: TransitionBlockData["predicate"] = "leafOf";
+  if (typeof entity !== "string") {
+    const not = when?.not as Record<string, unknown> | undefined;
+    entity = not?.leafOf;
+    predicate = "notLeafOf";
+  }
+  const set = record.set as Record<string, unknown> | undefined;
+  const variables = set ? Object.keys(set) : [];
+  if (typeof entity !== "string" || variables.length !== 1) return undefined;
+  const variable = variables[0];
+  const expression = set![variable];
+  const literal = literalValue(expression);
+  if (literal !== undefined) return { entity, predicate, variable, mode: "literal", value: literal };
+  const add = expression && typeof expression === "object"
+    ? (expression as Record<string, unknown>).add : undefined;
+  if (!Array.isArray(add) || add.length !== 2) return undefined;
+  const isSelf = (value: unknown) => Boolean(value && typeof value === "object"
+    && (value as Record<string, unknown>).var === variable);
+  const amount = isSelf(add[0]) ? literalValue(add[1])
+    : isSelf(add[1]) ? literalValue(add[0]) : undefined;
+  return amount === undefined
+    ? undefined
+    : { entity, predicate, variable, mode: "add", value: amount };
+}
+
+function triggerBlockData(trigger: unknown): TriggerBlockData | undefined {
+  if (!trigger || typeof trigger !== "object") return undefined;
+  const record = trigger as Record<string, unknown>;
+  const at = record.at as Record<string, unknown> | undefined;
+  const grant = record.grant as Record<string, unknown> | undefined;
+  const set = record.set as Record<string, unknown> | undefined;
+  if (typeof at?.trialCount !== "number"
+    || typeof grant?.leaf !== "string"
+    || (set && Object.keys(set).length > 0)) return undefined;
+  return {
+    trial: at.trialCount,
+    leaf: grant.leaf,
+    amount: typeof grant.amount === "number" ? grant.amount : 1,
+    consumesTrial: grant.consumesTrial === true,
+    appliesTransitions: grant.appliesTransitions !== false,
+  };
+}
+
+function conditionBlockData(condition: Expr | undefined) {
+  const ge = condition?.ge;
+  if (!Array.isArray(ge) || ge.length !== 2) return undefined;
+  const variable = ge[0] && typeof ge[0] === "object"
+    ? (ge[0] as Record<string, unknown>).var : undefined;
+  const count = literalValue(ge[1]);
+  if (typeof variable !== "string" || !variable.startsWith("n") || count === undefined) return undefined;
+  const entity = variable.slice(1);
+  return {
+    entity: entity.charAt(0).toLowerCase() + entity.slice(1),
+    count,
+  };
+}
+
+export function loadIr(workspace: Blockly.Workspace, ir: ModelIr): UnsupportedBlockItem[] {
+  const unsupported: UnsupportedBlockItem[] = [];
+  const preserved: WorkspaceRoundTripState = {
+    entities: [],
+    stateVars: [],
+    probRules: [],
+    transitions: [],
+    triggers: [],
+  };
   Blockly.Events.disable();
   try {
     workspace.clear();
     const root = createBlock(workspace, "model_container");
     root.moveBy(32, 28);
-    append(root.getInput("ENTITIES"), ir.entities.map((entity) => makeEntity(workspace, entity)));
-    append(root.getInput("STATE"), ir.stateVars.flatMap((variable) => {
-      if (variable.role === "stat") return [];
+    append(root.getInput("ENTITIES"), ir.entities.flatMap((entity, index) => {
+      if (supportedEntity(entity)) return [makeEntity(workspace, entity)];
+      preserved.entities.push({ index, value: structuredClone(entity) });
+      unsupported.push({ path: `entities[${index}]`, description: `뽑기 결과 '${entity.id}'의 일반 확률식` });
+      return [];
+    }));
+    append(root.getInput("STATE"), ir.stateVars.flatMap((variable, index) => {
+      const accumulator = accumulatorBlockData(variable);
+      const supportedControl = variable.role === "control"
+        && !variable.name
+        && !variable.clampPolicy
+        && (!variable.update || variable.update.length === 0);
+      if (!supportedControl && !accumulator) {
+        preserved.stateVars.push({ index, value: structuredClone(variable) });
+        const description = variable.role === "stat"
+          ? `통계 변수 '${variable.id}'`
+          : variable.role === "accumulator"
+            ? `집계 변수 '${variable.id}'의 복합 갱신식`
+            : `가챠 규칙 변수 '${variable.id}'의 추가 속성`;
+        unsupported.push({ path: `stateVars[${index}]`, description });
+        return [];
+      }
       const block = createBlock(workspace, variable.role === "accumulator" ? "accumulator_variable" : "control_variable");
       block.setFieldValue(variable.id, "ID");
       block.setFieldValue(variable.init, "INIT");
       block.setFieldValue(variable.max ?? 0, "MAX");
-      if (variable.role === "accumulator") {
+      if (accumulator) {
         block.setFieldValue(variable.name ?? variable.id, "NAME");
-        const update = variable.update?.[0];
-        const target = update?.when && "leafOf" in update.when ? update.when.leafOf : "__other__";
-        block.setFieldValue(String(target), "TARGET");
-        const add = update?.set?.add;
-        const amount = Array.isArray(add) ? simpleLiteral(add[1], "1") : "1";
-        block.setFieldValue(Number(amount), "AMOUNT");
+        block.setFieldValue(accumulator.target, "TARGET");
+        block.setFieldValue(Number(accumulator.amount), "AMOUNT");
       }
       return [block];
     }));
-    append(root.getInput("PROB_RULES"), (ir.probRules as Array<Record<string, unknown>>).flatMap((rule) => {
-      const expr = rule.expr as Record<string, unknown> | undefined;
-      const branch = expr?.if as Record<string, unknown> | undefined;
-      const ge = branch?.ge;
-      if (!Array.isArray(ge)) return [];
+    append(root.getInput("PROB_RULES"), ir.probRules.flatMap((rule, index) => {
+      const data = probRuleBlockData(rule);
+      if (!data) {
+        preserved.probRules.push({ index, value: structuredClone(rule) });
+        unsupported.push({ path: `probRules[${index}]`, description: `확률 규칙 ${index + 1}의 일반 표현식` });
+        return [];
+      }
       const block = createBlock(workspace, "soft_pity_rule");
-      block.setFieldValue(String(rule.target ?? ""), "TARGET");
-      block.setFieldValue(String((ge[0] as { var?: string })?.var ?? ""), "VAR");
-      block.setFieldValue(Number(simpleLiteral(ge[1], "0")), "THRESHOLD");
-      block.setFieldValue(simpleLiteral((expr?.else as Expr | undefined), "0"), "BASE");
+      block.setFieldValue(data.target, "TARGET");
+      block.setFieldValue(data.variable, "VAR");
+      block.setFieldValue(Number(data.threshold), "THRESHOLD");
+      block.setFieldValue(data.mode, "MODE");
+      block.setFieldValue(data.then, "THEN");
+      block.setFieldValue(data.base, "BASE");
+      block.setFieldValue(data.step, "STEP");
       return [block];
     }));
-    append(root.getInput("TRANSITIONS"), (ir.transitions as Array<Record<string, unknown>>).flatMap((transition) => {
-      const when = transition.when as { leafOf?: string } | undefined;
-      const set = transition.set as Record<string, unknown> | undefined;
-      const variable = set ? Object.keys(set)[0] : undefined;
-      if (!when?.leafOf || !set || !variable) return [];
-      const block = createBlock(workspace, "transition_set");
-      block.setFieldValue(when.leafOf, "ENTITY");
-      block.setFieldValue(variable, "VAR");
-      block.setFieldValue(simpleLiteral(set[variable]), "VALUE");
-      return [block];
-    }));
-    append(root.getInput("TRIGGERS"), (ir.triggers as Array<Record<string, unknown>>).flatMap((trigger) => {
-      const at = trigger.at as { trialCount?: number } | undefined;
-      const grant = trigger.grant as { leaf?: string; amount?: number } | undefined;
-      if (!at?.trialCount || !grant?.leaf) return [];
-      const block = createBlock(workspace, "grant_trigger");
-      block.setFieldValue(at.trialCount, "TRIAL");
-      block.setFieldValue(grant.leaf, "LEAF");
-      block.setFieldValue(grant.amount ?? 1, "AMOUNT");
-      return [block];
-    }));
-    const condition = ir.run.condition as { ge?: unknown[] } | undefined;
-    if (Array.isArray(condition?.ge)) {
-      const variable = (condition.ge[0] as { var?: string })?.var;
-      if (variable?.startsWith("n")) {
-        const block = createBlock(workspace, "first_hit_condition");
-        const entity = variable.slice(1);
-        block.setFieldValue(entity.charAt(0).toLowerCase() + entity.slice(1), "ENTITY");
-        block.setFieldValue(Number(simpleLiteral(condition.ge[1], "1")), "COUNT");
-        append(root.getInput("CONDITION"), [block]);
+    append(root.getInput("TRANSITIONS"), ir.transitions.flatMap((transition, index) => {
+      const data = transitionBlockData(transition);
+      if (!data) {
+        preserved.transitions.push({ index, value: structuredClone(transition) });
+        unsupported.push({ path: `transitions[${index}]`, description: `결과 변화 ${index + 1}의 일반 술어 또는 표현식` });
+        return [];
       }
+      const block = createBlock(workspace, "transition_set");
+      block.setFieldValue(data.entity, "ENTITY");
+      block.setFieldValue(data.predicate, "PREDICATE");
+      block.setFieldValue(data.variable, "VAR");
+      block.setFieldValue(data.mode, "SET_MODE");
+      block.setFieldValue(data.value, "VALUE");
+      return [block];
+    }));
+    append(root.getInput("TRIGGERS"), ir.triggers.flatMap((trigger, index) => {
+      const data = triggerBlockData(trigger);
+      if (!data) {
+        preserved.triggers.push({ index, value: structuredClone(trigger) });
+        unsupported.push({ path: `triggers[${index}]`, description: `시행 이벤트 ${index + 1}의 지급 외 동작` });
+        return [];
+      }
+      const block = createBlock(workspace, "grant_trigger");
+      block.setFieldValue(data.trial, "TRIAL");
+      block.setFieldValue(data.leaf, "LEAF");
+      block.setFieldValue(data.amount, "AMOUNT");
+      block.setFieldValue(data.consumesTrial ? "TRUE" : "FALSE", "CONSUMES");
+      block.setFieldValue(data.appliesTransitions ? "TRUE" : "FALSE", "APPLIES");
+      return [block];
+    }));
+    const condition = conditionBlockData(ir.run.condition);
+    if (condition) {
+      const block = createBlock(workspace, "first_hit_condition");
+      block.setFieldValue(condition.entity, "ENTITY");
+      block.setFieldValue(Number(condition.count), "COUNT");
+      append(root.getInput("CONDITION"), [block]);
+    } else if (ir.run.condition) {
+      preserved.condition = structuredClone(ir.run.condition);
+      unsupported.push({ path: "run.condition", description: "일반 최초 달성 조건식" });
     }
+    roundTripState.set(workspace, preserved);
   } finally {
     Blockly.Events.enable();
   }
+  return unsupported;
 }
 
 export function installWorkspaceVolume(

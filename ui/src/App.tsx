@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, FlaskConical, RotateCcw, Save, Settings, Upload } from "lucide-react";
-import { Blockly, installWorkspaceVolume, loadIr, toolbox, workspaceToIr } from "./blockly";
+import { Blockly, installWorkspaceVolume, loadIr, toolbox, workspaceToIr, type UnsupportedBlockItem } from "./blockly";
 import { EngineCancelledError, loadEngineBackend, runDpJson, type EngineBackend, type EngineProgress } from "./engine";
 import { parseEngineError, type EngineErrorPresentation } from "./engineDiagnostics";
 import { blueArchive, presets } from "./preset";
@@ -36,6 +36,7 @@ export function App() {
   const [json, setJson] = useState(() => JSON.stringify(model, null, 2));
   const [topTab, setTopTab] = useState<TopTab>("model");
   const [editorTab, setEditorTab] = useState<"blocks" | "json">("blocks");
+  const [unsupportedBlockItems, setUnsupportedBlockItems] = useState<UnsupportedBlockItem[]>([]);
   const [showMobileBlockNotice, setShowMobileBlockNotice] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const settingsRef = useRef(settings);
@@ -101,7 +102,7 @@ export function App() {
     });
     workspace.current = ws;
     installWorkspaceVolume(ws, () => settingsRef.current.soundVolume);
-    loadIr(ws, modelRef.current);
+    setUnsupportedBlockItems(loadIr(ws, modelRef.current));
     const listener = (event: Blockly.Events.Abstract) => {
       if (event.isUiEvent) return;
       const next = workspaceToIr(ws, modelRef.current);
@@ -127,7 +128,9 @@ export function App() {
   function setModelSynced(next: ModelIr, reloadBlocks = false) {
     setModel(next);
     setJson(JSON.stringify(next, null, 2));
-    if (reloadBlocks && workspace.current) loadIr(workspace.current, next);
+    if (reloadBlocks && workspace.current) {
+      setUnsupportedBlockItems(loadIr(workspace.current, next));
+    }
   }
 
   function applyJson() {
@@ -288,7 +291,7 @@ export function App() {
       </header>
       <main className="app-main">
         <div hidden={topTab !== "model"} className="tab-fill">
-          <ModelPanel blockHost={blockHost} editorTab={editorTab} setEditorTab={setEditorTab} showMobileBlockNotice={showMobileBlockNotice} dismissMobileBlockNotice={dismissMobileBlockNotice} model={model} json={json} setJson={setJson} applyJson={applyJson} validation={validation} focusDiagnostic={focusDiagnostic} openHelp={openHelp} />
+          <ModelPanel blockHost={blockHost} editorTab={editorTab} setEditorTab={setEditorTab} showMobileBlockNotice={showMobileBlockNotice} dismissMobileBlockNotice={dismissMobileBlockNotice} unsupportedBlockItems={unsupportedBlockItems} model={model} json={json} setJson={setJson} applyJson={applyJson} validation={validation} focusDiagnostic={focusDiagnostic} openHelp={openHelp} />
         </div>
         {topTab === "results" && <ResultPanel model={model} updateModel={(next) => setModelSynced(next)} settings={settings} results={results} running={running} canCancel={canCancel} progress={progress} engineError={engineError} message={message} run={run} cancelRun={cancelRun} openHelp={openHelp} />}
         {topTab === "help" && <HelpPanel focusCode={helpCode} />}
