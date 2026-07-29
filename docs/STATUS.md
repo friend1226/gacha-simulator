@@ -486,3 +486,29 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   모델 해시 `944d046c527df830889a72b6dc47ffb5540d279b6d41b09a934950830e53a73f`로
   완료되는 것을 확인했다. 375px에서 `clientWidth=360`,
   `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.
+
+## 2026-07-29 UI 정리 — 미지원 규칙 안내와 출처 배지
+
+- 블록 밖 규칙 안내는 규칙이 그대로 보존된다는 사실을 먼저 알리는 중립 정보
+  팔레트로 바꿨다. 4건 이상이면 경로 목록만 닫힌 `details`에 넣고 개수·보존
+  설명·IR JSON 이동 버튼은 항상 보이게 했다. `role="status"`는 유지했다.
+- 출처 confidence 세 값은 `공식 공시`, `데이터마이닝`, `커뮤니티 추정`으로
+  한국어화했다. 배지의 `title`에는 원문을 유지하고 등록되지 않은 미래 값은
+  원문 그대로 표시한다. `presets/`의 실제 confidence를 전부 순회해 라벨 누락을
+  막는 테스트를 추가했다.
+- 실제 프로덕션 미리보기에서 Arknights는 접힌 안내가 5건을 보고하고 펼치면
+  `probRules[0..3]`, `transitions[0]`이 모두 보였다. Blue Archive와
+  simple-pity에는 안내가 없었다. 배지는 각각 `공식 공시`, `커뮤니티 추정`으로
+  표시됐다. 375px에서 `innerWidth=375`, `clientWidth=360`,
+  `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.
+- `cargo test --workspace --exclude gacha-tauri`는 Rust 55/55를 117.1초에
+  통과했고 세 프리셋 골든과 Arknights 불변식도 그대로다. UI strict 타입 검사,
+  8개 파일의 26/26 테스트, 1,603개 모듈의 프로덕션 빌드가 통과했다.
+- 출처 이탈 추적은 조사만 하고 구현하지 않았다. 현재 `selectedPreset`은 모델과
+  독립이라 저장 모델을 복구하면 선택기는 Blue Archive인데 내용은 Arknights인
+  상태도 재현된다. 최소 변경안은 `loadPreset`만 provenance를 pristine으로
+  설정하고 Blockly 리스너, JSON 적용, 파일 열기, 결과 탭의 run 변경을 하나의
+  dirty 경로로 모으는 것이다. 이탈 후에는 배지를 숨기기보다 `수정됨`으로 표시하고,
+  저장 시 사실이 아닌 출처가 전파되지 않도록 `$preset`을 제거하는 편이 안전하다.
+  프로그램식 `loadIr` 이벤트와 localStorage 복구의 초기 provenance까지 함께
+  다뤄야 하므로 별도 작업으로 남겼다.

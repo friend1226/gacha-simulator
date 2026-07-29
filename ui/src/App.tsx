@@ -3,6 +3,7 @@ import { BookOpen, FlaskConical, RotateCcw, Save, Settings, Upload } from "lucid
 import { Blockly, getUnsupportedBlockItems, installWorkspaceVolume, loadIr, toolbox, workspaceToIr, type UnsupportedBlockItem } from "./blockly";
 import { EngineCancelledError, loadEngineBackend, runDpJson, type EngineBackend, type EngineProgress } from "./engine";
 import { parseEngineError, type EngineErrorPresentation } from "./engineDiagnostics";
+import { confidenceLabel as confidenceLabelFor } from "./labels";
 import { blueArchive, presets } from "./preset";
 import { loadSettings, normalizeSettings, saveSettings, type AppSettings } from "./settings";
 import { normalizeFirstHit } from "./firstHit";
@@ -272,6 +273,7 @@ export function App() {
   }
 
   const preset = presets.find((item) => item.id === selectedPreset) ?? presets[0];
+  const confidenceLabel = confidenceLabelFor(preset.meta.confidence);
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -284,7 +286,7 @@ export function App() {
         </nav>
         <div className="header-actions">
           <select value={selectedPreset} onChange={(event) => loadPreset(event.target.value)}>{presets.map((item) => <option value={item.id} key={item.id}>{item.meta.game} · {item.meta.banner}</option>)}</select>
-          <span className={`source-badge ${preset.meta.confidence === "official" ? "official" : ""}`}>{preset.meta.confidence}</span>
+          <span className={`source-badge ${preset.meta.confidence === "official" ? "official" : ""}`} title={preset.meta.confidence}>{confidenceLabel}</span>
           <button onClick={() => loadPreset()}><RotateCcw size={14} /> 초기화</button>
           <button onClick={saveModel}><Save size={14} /> 저장</button>
           <label className="file-button"><Upload size={14} /> 열기<input type="file" accept=".json,application/json" onChange={(event) => openModel(event.target.files?.[0])} /></label>

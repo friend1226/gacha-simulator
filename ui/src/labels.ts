@@ -4,6 +4,16 @@ export const engineLabels = {
   MC: "시뮬레이션 (MC)",
 } as const;
 
+export const confidenceLabels: Record<string, string> = {
+  official: "공식 공시",
+  datamined: "데이터마이닝",
+  "community-estimate": "커뮤니티 추정",
+};
+
+export function confidenceLabel(value: string): string {
+  return confidenceLabels[value] ?? value;
+}
+
 export const diagnosticHelp: Record<string, { title: string; fix: string }> = {
   E000: { title: "지원하지 않는 모델 버전", fix: "IR 버전을 1 또는 2로 바꾸세요." },
   E001: { title: "ID 중복", fix: "뽑기 결과마다 서로 다른 ID를 사용하세요." },

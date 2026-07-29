@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { parseEngineError } from "./engineDiagnostics";
-import { diagnosticHelp } from "./labels";
+import { confidenceLabel, confidenceLabels, diagnosticHelp } from "./labels";
+
+const presetModules = import.meta.glob("../../presets/*.json", {
+  eager: true,
+  import: "default",
+}) as Record<string, { $preset: { confidence: string } }>;
 
 describe("diagnostic labels", () => {
   it("has Korean guidance for every core diagnostic code", () => {
@@ -15,5 +20,23 @@ describe("diagnostic labels", () => {
     const parsed = parseEngineError(coreCodes.map((code) => `${code}: engine detail`).join("\n"));
     expect(parsed.diagnostics.map((item) => item.code)).toEqual(coreCodes);
     expect(parsed.diagnostics.every((item) => item.title && item.fix)).toBe(true);
+  });
+});
+
+describe("confidence labels", () => {
+  it("has a Korean label for every confidence value used by presets", () => {
+    for (const [path, preset] of Object.entries(presetModules)) {
+      const confidence = preset.$preset.confidence;
+      expect(confidenceLabels[confidence], `${path}: ${confidence}`).toBeTruthy();
+    }
+  });
+
+  it("covers every confidence value defined by DESIGN 10.4", () => {
+    expect(confidenceLabels).toEqual({
+      official: "공식 공시",
+      datamined: "데이터마이닝",
+      "community-estimate": "커뮤니티 추정",
+    });
+    expect(confidenceLabel("future-source")).toBe("future-source");
   });
 });
