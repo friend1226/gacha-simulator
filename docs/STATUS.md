@@ -598,3 +598,69 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   브라우저에서 데스크톱 안내 0건, 375px의 CSS 플래그 `1`과 안내 1건,
   닫은 뒤 새로고침 시 안내 0건을 확인했다. 375px에서 `innerWidth=375`,
   `clientWidth=360`, `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.
+
+## 2026-07-30 BACKLOG D — 구현 전 조사
+
+### MC 다중 Web Worker
+
+- 결론은 **고정 스트림 단위로 분할하면 착수 가능, UI에서 runs만 나누는 구현은
+  불가**다. 현재 코어는 4,096 run마다 스트림 번호를 부여하고 기본 시드에서
+  `jump()`한 RNG를 그 번호에 고정한다. 따라서 워커 수가 아니라 스트림 번호가
+  결과를 결정하도록 코어에 shard API를 만들면 같은 시드·run 수의 정수
+  히스토그램은 워커 수와 무관하게 같아진다.
+- 기존 native Rayon 경로도 같은 스트림 배열을 스레드에 나눈다.
+  `parallel_mc_is_reproducible_across_thread_counts`를 별도로 실행해 1스레드와
+  4스레드의 joint occurrences·first-hit·seed가 일치하는 단언이 통과함을
+  확인했다. 반대로 현재 WASM `run_mc_json`을 여러 워커에서 단순 호출하면 각
+  워커가 스트림 0부터 다시 시작하므로 중복 샘플이 생기며 이 방식은 금지해야 한다.
+- 구현 시 core/WASM이 `totalRuns`, base `seed`, 고정 stream 범위를 받는 partial
+  결과와 중앙 finalizer를 제공해야 한다. joint·first-hit·marginal·checkpoint의
+  정수 occurrences와 accumulator clamp 횟수는 합산하고, model hash·tracked
+  leaf·trial-series mode는 전 shard가 같은지 검증한다. 결과 순서는 기존처럼
+  정렬된 키로 확정한다.
+- Wilson 구간은 shard별 구간을 합치지 않고, 합산한 occurrences와 전역
+  `actualRuns`로 마지막에 한 번 계산한다. 결과의 seed는 base seed를 그대로
+  기록하므로 절대 규칙 6을 유지할 수 있다.
+- MC에는 프루닝 자체와 `prunedMass` 필드가 없어 프루닝 손실 합산은 해당 없음이다.
+  `clampEvents`는 모델 확률표의 정적 값이라 shard별로 같은지 확인한 뒤 한 번만
+  취하고, `accumulatorClampEvents`만 합산해야 한다. 둘을 모두 합산하면 정적
+  clamp가 워커 수만큼 부풀어 절대 규칙 8을 어긴다.
+- 진행률은 shard 완료 run의 합으로 보고하고, 취소 시 모든 워커를 종료하면서
+  partial 결과를 폐기해야 한다. DP·Exact는 대상에서 제외한다. SharedArrayBuffer와
+  COOP/COEP는 필요 없다. 권고는 core partial/finalizer와 재현성 테스트를 먼저,
+  WASM/프로토콜을 다음, 워커 풀·취소·실브라우저 성능 측정을 마지막 PR로 나누는
+  것이다. 이 조사에서는 구현하지 않았다.
+
+### Tauri 인스톨러
+
+- 현재 `bundle.active=false`이고 Windows x64의 단일 exe만 로컬 빌드가 확인된
+  상태다. 첫 대상은 **Windows x64 NSIS 설치 프로그램**을 권고한다. 기존
+  `icon.ico`와 Windows 실행 검증을 재사용할 수 있고, MSI에만 필요한 VBSCRIPT
+  선택 기능을 피할 수 있다. macOS와 Linux용 표준 아이콘 자산과 설치 실측은
+  아직 없다.
+- GitHub-hosted `windows-latest`에서 Rust·Node를 설치하고 `npm ci` 후 Tauri
+  build를 실행하는 build-only CI는 가능하다. 공식 `tauri-action`은 Windows,
+  macOS, Linux 빌드와 workflow artifact 업로드를 지원하며, release 관련 입력을
+  생략하면 GitHub Release를 만들지 않는다. Linux x64는 WebKitGTK 등 현재 CI에
+  없는 패키지를 설치해야 하고, macOS Intel/ARM은 macOS runner와 각 target이
+  필요하다.
+- Windows 서명은 실행 자체에는 필수가 아니지만 브라우저 다운로드의 SmartScreen
+  경고를 피하고 Microsoft Store에 올리려면 필요하다. 공개 배포 전 인증서 또는
+  Azure Artifact Signing 방식을 소유자가 선택해야 한다. macOS 공개 배포는 Apple
+  코드 서명이 필요하고, App Store 밖 DMG도 notarization이 필요하다. Linux
+  AppImage 서명은 별도 GPG 절차다.
+- 1단계는 unsigned Windows NSIS를 **workflow artifact로만** 만들어 설치 smoke
+  test에 쓰고, 2단계 공개 배포는 서명 방식을 정한 뒤 별도 승인하는 것이 안전하다.
+  현재 CI의 `contents: read`를 유지할 수 있다. GitHub Release 생성·asset 업로드는
+  `contents: write`, 태그/버전 정책, 공개·draft 여부가 필요하므로 이번 범위에서는
+  만들지 않는다.
+- 구현 전 소유자 결정 사항은 (1) Windows x64 NSIS 우선 여부, (2) 공개 전에 쓸
+  Windows 서명 수단, (3) workflow artifact만 만들지 draft GitHub Release까지
+  만들지, (4) macOS/Linux를 같은 M10에 포함할지다.
+- 확인한 공식 자료:
+  [Tauri GitHub 파이프라인](https://v2.tauri.app/distribute/pipelines/github/),
+  [tauri-action](https://github.com/tauri-apps/tauri-action),
+  [Windows 설치 프로그램](https://v2.tauri.app/distribute/windows-installer/),
+  [Windows 코드 서명](https://v2.tauri.app/distribute/sign/windows/),
+  [macOS 코드 서명](https://v2.tauri.app/distribute/sign/macos/),
+  [Tauri 사전 요구사항](https://v2.tauri.app/start/prerequisites/).
