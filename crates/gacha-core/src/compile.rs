@@ -1897,16 +1897,6 @@ fn compile_accumulator_table(
         })
         .collect::<Vec<_>>()
         .join("; ");
-    if total_entries >= ACCUMULATOR_TABLE_WARNING_ENTRIES {
-        diagnostics.push(warning(
-            "W009",
-            format!(
-                "accumulator precompute table requires {total_entries} entries; axes: {axes}; reduce max or remove control/trial dependency"
-            ),
-            specs.first().and_then(|spec| spec.block_id.clone()),
-        ));
-    }
-
     let trial_dependent = specs
         .iter()
         .map(|spec| spec.depends_on_trial)
@@ -1928,6 +1918,15 @@ fn compile_accumulator_table(
             trial_dependent,
             control_dependent,
         };
+    }
+    if total_entries >= ACCUMULATOR_TABLE_WARNING_ENTRIES {
+        diagnostics.push(warning(
+            "W009",
+            format!(
+                "accumulator precompute table requires {total_entries} entries; axes: {axes}; reduce max or remove control/trial dependency"
+            ),
+            specs.first().and_then(|spec| spec.block_id.clone()),
+        ));
     }
 
     let mut all_entries = Vec::with_capacity(specs.len());
