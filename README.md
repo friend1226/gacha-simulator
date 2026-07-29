@@ -59,6 +59,23 @@ npm run dev
 > 허용하지 않아서, `npm run dev`에서는 "DP 실행"/"MC 실행" 버튼이 동작하지
 > 않습니다. 계산까지 확인하려면 `npm run build && npm run preview`를 쓰세요.
 
+## Netlify 배포
+
+`main`에 push하면 GitHub Actions가 Rust/UI 테스트, WASM과 UI 프로덕션 빌드,
+`dist/wasm/gacha_wasm_bg.wasm` 존재 검사를 순서대로 통과한 뒤 `ui/dist`만 Netlify
+프로덕션 사이트에 배포합니다. WASM 산출물은 저장소에 커밋하지 않습니다.
+
+최초 1회 저장소 소유자가 다음 설정을 완료해야 실제 배포가 동작합니다.
+
+1. Netlify에서 빌드 명령이 없는 수동 배포 사이트를 생성합니다.
+2. Netlify 개인 액세스 토큰과 사이트 ID를 확인합니다.
+3. GitHub 저장소 Actions secrets에 `NETLIFY_AUTH_TOKEN`과 `NETLIFY_SITE_ID`를
+   등록합니다.
+
+수동 재배포는 GitHub Actions의 **Deploy to Netlify** 워크플로에서
+`workflow_dispatch`로 실행할 수 있습니다. 자세한 운영 방법은
+[`docs/USAGE.md`](docs/USAGE.md#34-netlify-프로덕션-배포)를 참고하세요.
+
 ## 더 알아보기
 
 - **[`docs/USAGE.md`](docs/USAGE.md)** — Windows/CLI/웹 실행 방법, UI 사용법(블록

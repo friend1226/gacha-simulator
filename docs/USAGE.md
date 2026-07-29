@@ -133,7 +133,34 @@ npm run preview     # http://localhost:4173 에서 dist/ 를 그대로 서빙
 (`docs/STATUS.md` 2026-07-29 항목에서 실제 브라우저로 검증됨). 정적 호스팅(GitHub
 Pages, S3 등)에 배포할 때도 `dist/`를 그대로 올리면 된다.
 
-### 3.4 UI 사용법
+### 3.4 Netlify 프로덕션 배포
+
+배포는 Netlify 빌드 환경이 아니라 GitHub Actions의
+`.github/workflows/deploy.yml`에서 수행한다. `main` push 또는 수동 실행 시 다음
+게이트를 모두 통과해야 프로덕션 배포 단계가 실행된다.
+
+1. `cargo test --workspace --exclude gacha-tauri`
+2. UI 의존성 설치, TypeScript 검사, UI 단위 테스트
+3. `wasm-pack`으로 `ui/public/wasm` 생성
+4. Vite 프로덕션 빌드
+5. `ui/dist/wasm/gacha_wasm_bg.wasm` 존재 확인
+6. `ui/dist`를 Netlify 프로덕션 사이트에 업로드
+
+WASM과 `dist`는 빌드 산출물이므로 git에 커밋하지 않는다. 캐시는 해시가 붙는
+`/assets/*`만 1년 `immutable`이며, 이름이 고정된 `/wasm/*`와 `/index.html`은
+재배포를 즉시 확인하도록 매 요청 재검증한다.
+
+최초 배포 전에 저장소 소유자가 다음 세 가지를 직접 준비해야 한다.
+
+1. Netlify에서 **빌드 명령 없이** 수동 배포 사이트 생성
+2. Netlify 개인 액세스 토큰 발급과 사이트 ID 확인
+3. GitHub Actions secrets에 `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID` 등록
+
+시크릿 등록 후 `main`에 push하거나 GitHub Actions의 **Deploy to Netlify**에서
+수동 실행한다. Netlify가 저장소를 직접 빌드할 필요는 없으며, 실수로 연결해도
+`netlify.toml`의 ignore 설정이 자체 빌드를 중단한다.
+
+### 3.5 UI 사용법
 
 화면 상단에는 **모델 · 결과 · 도움말 · 설정** 탭이 있다. 900px보다 좁은 화면에서는
 모델 편집기와 검증 패널이 세로로 배치된다.

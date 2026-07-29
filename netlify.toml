@@ -1,0 +1,5 @@
+# Production assets are built and deployed by .github/workflows/deploy.yml.
+# If this repository is ever linked directly, skip Netlify's own build.
+[build]
+  publish = "ui/dist"
+  ignore = "exit 0"
