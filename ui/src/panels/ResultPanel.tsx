@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { defaultAxes, pivot, pivotKey, probabilityOf, toCsv, type Axis, type AxisRole, type PivotCell } from "../pivot";
 import { engineLabels } from "../labels";
 import type { EngineProgress } from "../engine";
+import type { EngineErrorPresentation } from "../engineDiagnostics";
 import { formatProbability, type AppSettings } from "../settings";
 import type { EngineResult, ModelIr, ResultCell } from "../types";
 
@@ -14,9 +15,11 @@ export function ResultPanel({
   running,
   canCancel,
   progress,
+  engineError,
   message,
   run,
   cancelRun,
+  openHelp,
 }: {
   model: ModelIr;
   updateModel: (model: ModelIr) => void;
@@ -25,9 +28,11 @@ export function ResultPanel({
   running?: "dp" | "mc";
   canCancel: boolean;
   progress?: EngineProgress;
+  engineError?: EngineErrorPresentation;
   message: string;
   run: (engine: "dp" | "mc", runs: number, seed: number) => void;
   cancelRun: () => void;
+  openHelp: (code: string) => void;
 }) {
   const ids = results.dp?.trackedLeafIds ?? results.mc?.trackedLeafIds ?? model.run.trackJoint;
   const [axes, setAxes] = useState<Axis[]>(() => defaultAxes(ids));
@@ -69,6 +74,7 @@ export function ResultPanel({
             <span>{progress.completed.toLocaleString()} / {progress.total.toLocaleString()} ({Math.floor(progress.completed / progress.total * 100)}%)</span>
           </div>
         )}
+        {engineError && <EngineErrorNotice error={engineError} openHelp={openHelp} />}
       </div>
       <details className="track-picker">
         <summary>추적 대상 · {model.run.trackJoint.join(", ") || "선택 없음"}</summary>
@@ -85,6 +91,33 @@ export function ResultPanel({
           {(results.dp?.firstHit || results.mc?.firstHit) && <FirstHitView result={results.dp ?? results.mc!} settings={settings} />}
         </>
       ) : <div className="empty-results"><h2>아직 계산 결과가 없습니다</h2><p>위 실행 바에서 계산 방식을 선택하세요.</p></div>}
+    </section>
+  );
+}
+
+function EngineErrorNotice({
+  error,
+  openHelp,
+}: {
+  error: EngineErrorPresentation;
+  openHelp: (code: string) => void;
+}) {
+  return (
+    <section className="engine-diagnostics" role="alert">
+      <h2>계산을 실행하지 못했습니다</h2>
+      <ul>
+        {error.diagnostics.map((diagnostic, index) => (
+          <li key={`${diagnostic.code}-${index}`}>
+            <b>{diagnostic.code}{diagnostic.title ? ` · ${diagnostic.title}` : ""}</b>
+            <span>{diagnostic.fix ?? diagnostic.original}</span>
+            {diagnostic.title && <button type="button" onClick={() => openHelp(diagnostic.code)}>도움말에서 보기</button>}
+          </li>
+        ))}
+      </ul>
+      <details>
+        <summary>영문 원문 자세히</summary>
+        <pre>{error.original}</pre>
+      </details>
     </section>
   );
 }

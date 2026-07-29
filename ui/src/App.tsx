@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, FlaskConical, RotateCcw, Save, Settings, Upload } from "lucide-react";
 import { Blockly, installWorkspaceVolume, loadIr, toolbox, workspaceToIr } from "./blockly";
 import { EngineCancelledError, loadEngineBackend, runDpJson, type EngineBackend, type EngineProgress } from "./engine";
+import { parseEngineError, type EngineErrorPresentation } from "./engineDiagnostics";
 import { blueArchive, presets } from "./preset";
 import { loadSettings, normalizeSettings, saveSettings, type AppSettings } from "./settings";
 import { normalizeFirstHit } from "./firstHit";
@@ -44,6 +45,7 @@ export function App() {
   const [running, setRunning] = useState<"dp" | "mc">();
   const [canCancel, setCanCancel] = useState(false);
   const [progress, setProgress] = useState<EngineProgress>();
+  const [engineError, setEngineError] = useState<EngineErrorPresentation>();
   const [results, setResults] = useState<{ dp?: EngineResult; mc?: EngineResult }>({});
   const validation = useMemo(() => validateLocally(model), [model]);
   const hasError = validation.diagnostics.some((item) => item.severity === "error");
@@ -51,6 +53,7 @@ export function App() {
   useEffect(() => {
     modelRef.current = model;
     localStorage.setItem(MODEL_STORAGE, JSON.stringify(model));
+    setEngineError(undefined);
   }, [model]);
   useEffect(() => { settingsRef.current = settings; saveSettings(settings); }, [settings]);
 
@@ -180,6 +183,7 @@ export function App() {
     setRunning(engine);
     setCanCancel(false);
     setProgress(undefined);
+    setEngineError(undefined);
     setMessage(engine === "dp" ? "정확 계산을 실행하는 중…" : "시뮬레이션을 실행하는 중…");
     try {
       const backend = await loadEngineBackend();
@@ -212,14 +216,20 @@ export function App() {
         modelHash: parsed.modelHash,
       };
       setResults((current) => engine === "mc" ? { ...current, mc: result } : { ...current, dp: result });
+      setEngineError(undefined);
       setMessage(`${engine === "dp" ? "정확 계산" : "시뮬레이션"} 완료 · ${result.joint.length.toLocaleString()}개 결과 셀 · ${result.elapsedMs}ms`);
       setTopTab("results");
     } catch (error) {
       if (error instanceof EngineCancelledError || currentExecution !== executionId.current) return;
       const text = String(error);
-      setMessage(text.includes("dynamically imported module") || text.includes("Cannot find module")
-        ? "WASM 패키지가 없습니다. 루트에서 wasm-pack build 명령을 실행하세요."
-        : `실행 오류: ${text}`);
+      if (text.includes("dynamically imported module") || text.includes("Cannot find module")) {
+        setEngineError(undefined);
+        setMessage("WASM 패키지가 없습니다. 루트에서 wasm-pack build 명령을 실행하세요.");
+      } else {
+        const presentation = parseEngineError(text);
+        setEngineError(presentation.diagnostics.length ? presentation : undefined);
+        setMessage(presentation.diagnostics.length ? "엔진 진단을 확인하세요." : `실행 오류: ${text}`);
+      }
     } finally {
       if (currentExecution === executionId.current) {
         setRunning(undefined);
@@ -236,6 +246,7 @@ export function App() {
     setRunning(undefined);
     setCanCancel(false);
     setProgress(undefined);
+    setEngineError(undefined);
     setMessage("계산을 취소했습니다.");
   }
 
@@ -279,7 +290,7 @@ export function App() {
         <div hidden={topTab !== "model"} className="tab-fill">
           <ModelPanel blockHost={blockHost} editorTab={editorTab} setEditorTab={setEditorTab} showMobileBlockNotice={showMobileBlockNotice} dismissMobileBlockNotice={dismissMobileBlockNotice} model={model} json={json} setJson={setJson} applyJson={applyJson} validation={validation} focusDiagnostic={focusDiagnostic} openHelp={openHelp} />
         </div>
-        {topTab === "results" && <ResultPanel model={model} updateModel={(next) => setModelSynced(next)} settings={settings} results={results} running={running} canCancel={canCancel} progress={progress} message={message} run={run} cancelRun={cancelRun} />}
+        {topTab === "results" && <ResultPanel model={model} updateModel={(next) => setModelSynced(next)} settings={settings} results={results} running={running} canCancel={canCancel} progress={progress} engineError={engineError} message={message} run={run} cancelRun={cancelRun} openHelp={openHelp} />}
         {topTab === "help" && <HelpPanel focusCode={helpCode} />}
         {topTab === "settings" && <SettingsPanel settings={settings} update={updateSettings} />}
       </main>

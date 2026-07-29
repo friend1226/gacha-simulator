@@ -352,6 +352,13 @@ fn accumulator_table_preflight_warns_and_rejects_before_unsafe_expansion() {
         .iter()
         .find(|diagnostic| diagnostic.code == "E010")
         .expect("the hard table guard must have a dedicated error");
+    assert!(
+        error
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "W009"),
+        "E010 must replace the lower-severity W009 signal"
+    );
     assert!(diagnostic.message.contains("60001000"));
     assert!(diagnostic.message.contains("control=1"));
     assert!(diagnostic.message.contains("trials=500"));
