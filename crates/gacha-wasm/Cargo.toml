@@ -12,4 +12,5 @@ gacha-core = { path = "../gacha-core", default-features = false, features = ["bi
 serde_json.workspace = true
 wasm-bindgen.workspace = true
 getrandom.workspace = true
+js-sys.workspace = true
 

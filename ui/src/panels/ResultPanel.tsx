@@ -1,7 +1,8 @@
-import { Copy, Download, Play } from "lucide-react";
+import { Copy, Download, Play, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { defaultAxes, pivot, pivotKey, probabilityOf, toCsv, type Axis, type AxisRole, type PivotCell } from "../pivot";
 import { engineLabels } from "../labels";
+import type { EngineProgress } from "../engine";
 import { formatProbability, type AppSettings } from "../settings";
 import type { EngineResult, ModelIr, ResultCell } from "../types";
 
@@ -11,16 +12,22 @@ export function ResultPanel({
   settings,
   results,
   running,
+  canCancel,
+  progress,
   message,
   run,
+  cancelRun,
 }: {
   model: ModelIr;
   updateModel: (model: ModelIr) => void;
   settings: AppSettings;
   results: { dp?: EngineResult; mc?: EngineResult };
   running?: "dp" | "mc";
+  canCancel: boolean;
+  progress?: EngineProgress;
   message: string;
   run: (engine: "dp" | "mc", runs: number, seed: number) => void;
+  cancelRun: () => void;
 }) {
   const ids = results.dp?.trackedLeafIds ?? results.mc?.trackedLeafIds ?? model.run.trackJoint;
   const [axes, setAxes] = useState<Axis[]>(() => defaultAxes(ids));
@@ -53,8 +60,15 @@ export function ResultPanel({
         <div className="run-buttons">
           <button disabled={Boolean(running)} onClick={() => run("dp", runs, seed)}><Play size={15} /> 정확 계산</button>
           <button disabled={Boolean(running)} className="secondary" onClick={() => run("mc", runs, seed)}><Play size={15} /> 시뮬레이션</button>
+          {running && canCancel && <button className="cancel" onClick={cancelRun}><Square size={14} /> 취소</button>}
         </div>
         <p>{message}</p>
+        {running && progress && (
+          <div className="run-progress" role="status">
+            <progress value={progress.completed} max={progress.total} />
+            <span>{progress.completed.toLocaleString()} / {progress.total.toLocaleString()} ({Math.floor(progress.completed / progress.total * 100)}%)</span>
+          </div>
+        )}
       </div>
       <details className="track-picker">
         <summary>추적 대상 · {model.run.trackJoint.join(", ") || "선택 없음"}</summary>
