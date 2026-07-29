@@ -1,5 +1,6 @@
 import { Activity, Braces, CircleAlert, CircleCheck, X } from "lucide-react";
 import type { RefObject } from "react";
+import type { UnsupportedBlockItem } from "../blockly";
 import type { Diagnostic, ModelIr, ValidationView } from "../types";
 
 export function ModelPanel({
@@ -8,6 +9,7 @@ export function ModelPanel({
   setEditorTab,
   showMobileBlockNotice,
   dismissMobileBlockNotice,
+  unsupportedBlockItems,
   model,
   json,
   setJson,
@@ -21,6 +23,7 @@ export function ModelPanel({
   setEditorTab: (tab: "blocks" | "json") => void;
   showMobileBlockNotice: boolean;
   dismissMobileBlockNotice: () => void;
+  unsupportedBlockItems: UnsupportedBlockItem[];
   model: ModelIr;
   json: string;
   setJson: (value: string) => void;
@@ -59,6 +62,14 @@ export function ModelPanel({
           <span>검증 결과</span>
           <span className={hasError ? "status bad" : "status good"}>{hasError ? "오류" : "정상"}</span>
         </div>
+        {unsupportedBlockItems.length > 0 && (
+          <div className="unsupported-block-warning" role="status">
+            <b>이 모델에는 블록으로 편집할 수 없는 규칙이 {unsupportedBlockItems.length}개 있습니다.</b>
+            <span>해당 규칙은 블록을 편집해도 보존됩니다. IR JSON 탭에서 확인하세요.</span>
+            <ul>{unsupportedBlockItems.map((item) => <li key={item.path}><code>{item.path}</code> · {item.description}</li>)}</ul>
+            <button type="button" onClick={() => setEditorTab("json")}><Braces size={14} /> IR JSON 열기</button>
+          </div>
+        )}
         <div className="leaf-list">
           {validation.leaves.map((leaf) => (
             <div className="leaf-row" key={leaf.id}>

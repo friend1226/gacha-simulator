@@ -400,3 +400,28 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
 - 브라우저 개발자 로그는 0건이었고 375px에서 `clientWidth=360`,
   `scrollWidth=360`이었다. Rust 53개와 기존 프리셋 골든, UI 16개 테스트,
   타입 검사와 프로덕션 빌드가 모두 통과했다.
+
+## 2026-07-29 FIX B — Blockly ↔ IR 무손실 왕복
+
+- `loadIr`가 블록으로 표현하지 못하는 엔티티·상태 변수·확률 규칙·전이·트리거·
+  최초 달성 조건을 경로와 함께 반환하고, 워크스페이스별로 보관한다.
+  `workspaceToIr`는 블록으로 편집한 항목과 이 보관 항목을 원래 순서로 합쳐
+  블록 이동이나 편집만으로 일반 IR 규칙이 조용히 삭제되지 않게 했다.
+- 미지원 항목은 검증 패널에 개수·IR 경로·설명과 `IR JSON 열기` 버튼으로 계속
+  표시한다. `role: "stat"`, 복합 accumulator 갱신, 일반 condition은 편집 범위
+  밖에 두되 그대로 보존한다.
+- 천장 모델의 기본형을 직접 편집할 수 있도록 `not: {leafOf}` 전이, `변수 + 상수`
+  전이 값, 리터럴 `then` 하드 실링과 선형 증가량, 트리거의 `consumesTrial` /
+  `appliesTransitions` 체크박스를 추가했다.
+- `import.meta.glob("../../presets/*.json")`으로 `presets/`의 모든 파일을 자동
+  순회하는 왕복 테스트를 추가했다. `simple-pity`의 하드 실링과 두 전이가
+  보존되고, 비기본 트리거 플래그와 미지원 stat/일반 condition 보존까지 포함해
+  UI 테스트 20/20이 통과했다.
+- 실제 프로덕션 미리보기에서 `simple-pity` 루트 블록을 드래그한 뒤 IR JSON의
+  전이가 2개이고 두 번째가 `not leafOf rare`일 때 `pity + 1`인 것을 확인했다.
+  미지원 규칙 2개를 넣으면 `stateVars[1]`과 `run.condition` 경고가 표시됐다.
+  브라우저 개발자 로그는 0건이었고 375px에서 `clientWidth=360`,
+  `scrollWidth=360`이었다.
+- `cargo test --workspace --exclude gacha-tauri`는 53/53과 두 프리셋 골든을
+  135.7초에 통과했다. `npx tsc --noEmit`, UI 20/20, `npm run build`도 통과했고
+  프로덕션 빌드는 1,602개 모듈과 ES module Worker 청크를 생성했다.
