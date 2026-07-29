@@ -30,4 +30,29 @@ describe("pivot", () => {
     ]);
     expect(table.total).toBe(0.75);
   });
+
+  it("preserves and aggregates probabilities below the f64 range", () => {
+    const single = pivot([
+      { counts: [200], probability: 0, display: "1.04618382913e-431" },
+    ], [{ key: "hit", label: "Hit", role: "row" }]);
+    expect(single.cells[0].probability).toBe(0);
+    expect(single.cells[0].display).toBe("1.04618382913e-431");
+
+    const aggregated = pivot([
+      { counts: [200, 0], probability: 0, display: "1.04618382913e-431" },
+      { counts: [200, 1], probability: 0, display: "2.00000000000e-431" },
+    ], [
+      { key: "hit", label: "Hit", role: "row" },
+      { key: "extra", label: "Extra", role: "sum" },
+    ]);
+    expect(aggregated.cells[0].display).toBe("3.04618382913e-431");
+
+    const exact = pivot([{
+      counts: [200],
+      probability: 0,
+      numerator: (7n ** 200n).toString(),
+      denominator: (1000n ** 200n).toString(),
+    }], [{ key: "hit", label: "Hit", role: "row" }]);
+    expect(exact.cells[0].display).toBe("1.04618382913e-431");
+  });
 });

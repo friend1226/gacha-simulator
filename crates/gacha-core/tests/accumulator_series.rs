@@ -3,6 +3,40 @@ use gacha_core::{
 };
 use serde_json::json;
 
+fn large_accumulator_table_model(maximum: u32, max_trials: u32) -> ModelIr {
+    serde_json::from_value(json!({
+        "irVersion": 2,
+        "name": "accumulator table preflight",
+        "entities": [{"id": "hit", "name": "hit", "prob": {"lit": "1/2"}}],
+        "stateVars": [{
+            "id": "score",
+            "init": 0,
+            "max": maximum,
+            "role": "accumulator",
+            "update": [
+                {
+                    "when": {"leafOf": "hit"},
+                    "set": {"add": [{"var": "score"}, {"trial": true}]}
+                },
+                {
+                    "when": {"not": {"leafOf": "hit"}},
+                    "set": {"add": [{"var": "score"}, {"trial": true}]}
+                }
+            ]
+        }],
+        "probRules": [],
+        "transitions": [],
+        "triggers": [],
+        "run": {
+            "maxTrials": max_trials,
+            "trackJoint": ["score"],
+            "numeric": "scaled",
+            "trialSeries": "none"
+        }
+    }))
+    .unwrap()
+}
+
 fn accumulator_model(numeric: &str) -> ModelIr {
     serde_json::from_value(json!({
         "irVersion": 2,
@@ -290,4 +324,36 @@ fn mc_marginal_series_matches_dp_absorption_with_wilson_intervals() {
             interval.upper,
         );
     }
+}
+
+#[test]
+fn accumulator_table_preflight_warns_and_rejects_before_unsafe_expansion() {
+    for (maximum, max_trials, expected_entries) in
+        [(2_000, 200, 800_400u64), (20_000, 200, 8_000_400u64)]
+    {
+        let model = compile(&large_accumulator_table_model(maximum, max_trials))
+            .expect("tables below the hard limit must still compile");
+        let warning = model
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "W009")
+            .expect("large safe tables must warn");
+        assert!(warning.message.contains(&expected_entries.to_string()));
+        assert!(warning.message.contains("trials=200"));
+        assert!(warning
+            .message
+            .contains(&format!("current=max+1={}", maximum + 1)));
+    }
+
+    let error = compile(&large_accumulator_table_model(60_000, 500))
+        .expect_err("60M entries must be rejected before allocation");
+    let diagnostic = error
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E010")
+        .expect("the hard table guard must have a dedicated error");
+    assert!(diagnostic.message.contains("60001000"));
+    assert!(diagnostic.message.contains("control=1"));
+    assert!(diagnostic.message.contains("trials=500"));
+    assert!(diagnostic.message.contains("current=max+1=60001"));
 }

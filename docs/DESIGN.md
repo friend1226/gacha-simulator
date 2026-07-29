@@ -249,6 +249,7 @@ pub struct ExactLayer {
       "id": "spent", "name": "소모 재화", "init": 0, "max": 120000,
       "role": "accumulator",
       "update": [
+        // 제어 변수나 trial을 참조하지 않아 사전계산 축은 (리프 × 현재값)만 사용한다.
         { "when": { "leafOf": "star3" },
           "set": { "add": [{ "var": "spent" }, { "lit": "120" }] } },
         { "when": { "not": { "leafOf": "star3" } },
@@ -368,6 +369,8 @@ f64로 먼저 파싱한 뒤 유리수로 변환하면 `0.007`이 `7.000000000000
 | E008 | `transitions`/`triggers`가 리프 카운트를 직접 조작 | error |
 | E009 | 자동 리프 카운터용 `role: stat`을 사용자가 선언 | error |
 | W008 | accumulator가 자동 리프 카운터와 동일하여 파생 표시식으로 강등 | warning |
+| W009 | accumulator 사전계산 테이블이 500,000 엔트리 이상 | warning |
+| E010 | accumulator 사전계산 테이블 합계가 10,000,000 엔트리 초과 | error |
 
 ### 3.5 카운트 모델 (필독)
 
@@ -399,6 +402,12 @@ f64로 먼저 파싱한 뒤 유리수로 변환하면 `0.007`이 `7.000000000000
 자동 리프 카운터와 동일한 `x = x + 1 when leafOf(...)` 집계 변수는 `W008`을 내고
 상태 축을 만들지 않은 채 리프 합으로 파생한다. `max` 초과 시 기본 `saturate`는
 보정 횟수를 `accumulatorClampEvents`로 별도 보고하며, `error`는 컴파일을 거부한다.
+
+사전계산 테이블은 전개 전에 모든 accumulator의
+`제어상태 × 시행 × 리프 × (max+1)` 엔트리를 합산한다. 500,000 이상은 `W009`로
+축별 크기와 완화 방법을 알리고, 기존 확률표 상한과 같은 10,000,000을 넘으면
+OOM 위험 때문에 `E010`으로 컴파일을 거부한다. 여러 accumulator의 합계에도 같은
+상한을 적용한다.
 
 갱신 순서는 **일반 뽑기 확정 → transitions → accumulator 갱신 → grant**로 고정한다.
 `appliesTransitions: true` 지급은 transition 뒤 accumulator 갱신도 일반 결과와 같이
@@ -985,7 +994,9 @@ ExactInt 백엔드는 동일한 필드를 `ExactFirstHitResult`로 반환한다.
 
 ### 13.3 테스트 격차 (최우선)
 
-현재 Rust 워크스페이스 테스트 47개. §9의 우선 검증 1~7을 모두 구현했다.
+현재 Rust 워크스페이스 테스트는 M9 리뷰 후속을 포함해 53개다. §9의 우선 검증
+1~7을 모두 구현했으며, accumulator는 packed fast path와 `consumesTrial` 지급 slow
+path를 각각 MC 10^6회 Wilson 규율로 교차검증한다.
 
 | 우선순위 | 테스트 | 스펙 | 상태 |
 |---|---|---|---|
@@ -1000,6 +1011,14 @@ ExactInt 백엔드는 동일한 필드를 `ExactFirstHitResult`로 반환한다.
 1~7번은 2026-07-27 구현 및 실행 검증을 완료했다. §13.2의 E002/W003 진단과 §13.1의 exact 흡수 상태도 후속 작업에서 해소했다.
 
 ### 13.4 검증 이력
+
+**2026-07-29 M9 리뷰 후속**: accumulator 테이블을 전개 전 합산해 50만 엔트리
+경고(`W009`)와 1천만 엔트리 hard error(`E010`)를 적용했다. 결과 피벗의 표시 합산은
+엔진 `display`를 BigInt 가수·10진 지수로 더하고, Exact 셀은 분자·분모에서 같은
+12자리 표기를 계산하므로 f64보다 작은 확률도 보존한다.
+히트맵은 `row\0col` Map 조회를 사용하고 행·열 모두 설정 상한을 적용하며 생략량을
+명시한다. 제어 의존 fast path와 `consumesTrial` slow path accumulator 모델을 기존
+MC 10^6회 Wilson 교차검증에 추가했다.
 
 **2026-07-27**: `cargo build --workspace && cargo test --workspace`를 이 환경에서 처음 실행해 확인했다. **빌드 성공, 테스트 7/7 통과** (경고 1건: `compile.rs:230`의 `EntityDef.name` 미사용 dead code). v1.1 원문의 "cargo test가 아직 한 번도 실행된 적이 없다"는 서술은 이 시점부로 해소되었다 — `docs/STATUS.md`도 함께 갱신했다.
 

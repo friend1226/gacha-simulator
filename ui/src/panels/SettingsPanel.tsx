@@ -31,7 +31,7 @@ export function SettingsPanel({
             <option value="scientific">지수</option><option value="decimal">소수</option><option value="percent">퍼센트</option><option value="reciprocal">1/N</option>
           </select>
         </label>
-        <label>결과 표 최대 행 수
+        <label>결과 표 최대 행·열 수
           <input type="number" min="10" max="10000" value={settings.maxRows} onChange={(event) => update({ maxRows: Number(event.target.value) })} />
         </label>
       </div>

@@ -254,3 +254,131 @@ fn pickup_grant_shifts_derived_parent_distribution_by_exactly_one() {
         );
     }
 }
+
+fn accumulator_cross_model(control_dependent: bool) -> gacha_core::CompiledModel {
+    let (state_vars, transitions, triggers, max_trials) = if control_dependent {
+        (
+            json!([
+                {"id": "pity", "init": 0, "max": 2, "role": "control"},
+                {
+                    "id": "score",
+                    "init": 0,
+                    "max": 8,
+                    "role": "accumulator",
+                    "update": [
+                        {
+                            "when": {"leafOf": "hit"},
+                            "set": {"add": [{"var": "score"}, {"var": "pity"}]}
+                        },
+                        {
+                            "when": {"not": {"leafOf": "hit"}},
+                            "set": {"add": [{"var": "score"}, {"var": "pity"}]}
+                        }
+                    ]
+                }
+            ]),
+            json!([
+                {"when": {"leafOf": "hit"}, "set": {"pity": {"lit": "0"}}},
+                {
+                    "when": {"not": {"leafOf": "hit"}},
+                    "set": {"pity": {"add": [{"var": "pity"}, {"lit": "1"}]}}
+                }
+            ]),
+            json!([]),
+            4,
+        )
+    } else {
+        (
+            json!([{
+                "id": "score",
+                "init": 0,
+                "max": 12,
+                "role": "accumulator",
+                "update": [
+                    {
+                        "when": {"leafOf": "hit"},
+                        "set": {"add": [{"var": "score"}, {"lit": "3"}]}
+                    },
+                    {
+                        "when": {"not": {"leafOf": "hit"}},
+                        "set": {"add": [{"var": "score"}, {"lit": "1"}]}
+                    }
+                ]
+            }]),
+            json!([]),
+            json!([{
+                "at": {"trialCount": 2},
+                "grant": {
+                    "leaf": "hit",
+                    "amount": 1,
+                    "consumesTrial": true,
+                    "appliesTransitions": true
+                }
+            }]),
+            4,
+        )
+    };
+    let ir: ModelIr = serde_json::from_value(json!({
+        "irVersion": 2,
+        "name": "accumulator cross validation",
+        "entities": [{"id": "hit", "name": "hit", "prob": {"lit": "0.37"}}],
+        "stateVars": state_vars,
+        "probRules": [],
+        "transitions": transitions,
+        "triggers": triggers,
+        "run": {
+            "maxTrials": max_trials,
+            "trackJoint": ["hit", "score"],
+            "numeric": "scaled",
+            "trialSeries": "none"
+        }
+    }))
+    .unwrap();
+    compile(&ir).unwrap()
+}
+
+fn assert_accumulator_mc_matches_dp(model: &gacha_core::CompiledModel, seed: u64) {
+    let dp = run_scaled(model);
+    let mc = run_mc(
+        model,
+        McOptions {
+            runs: 1_000_000,
+            seed,
+            confidence_z: WILSON_95_Z,
+            batch_size: 50_000,
+        },
+        |_, _| true,
+    );
+    let mc_cells: HashMap<_, _> = mc
+        .joint
+        .iter()
+        .map(|cell| (cell.counts.clone(), cell.interval))
+        .collect();
+    let zero = wilson(0, mc.runs, WILSON_95_Z);
+    let outside = dp
+        .joint
+        .iter()
+        .filter(|cell| {
+            let interval = mc_cells.get(&cell.counts).copied().unwrap_or(zero);
+            cell.probability < interval.lower || cell.probability > interval.upper
+        })
+        .count();
+    assert!(
+        outside * 20 < dp.joint.len(),
+        "{outside} of {} accumulator cells fell outside Wilson intervals",
+        dp.joint.len(),
+    );
+}
+
+#[test]
+fn accumulator_models_extend_mc_dp_cross_validation_across_fast_and_slow_paths() {
+    let fast = accumulator_cross_model(true);
+    assert!(fast.packed_transition_fast_path());
+    assert!(fast.accumulator_table.control_dependent[0]);
+    assert_accumulator_mc_matches_dp(&fast, 6_201);
+
+    let slow = accumulator_cross_model(false);
+    assert!(!slow.packed_transition_fast_path());
+    assert!(!slow.accumulator_table.control_dependent[0]);
+    assert_accumulator_mc_matches_dp(&slow, 6_202);
+}

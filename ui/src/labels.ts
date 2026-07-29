@@ -15,6 +15,7 @@ export const diagnosticHelp: Record<string, { title: string; fix: string }> = {
   E007: { title: "확정 지급 대상 오류", fix: "최종 항목(리프) ID를 선택하세요." },
   E008: { title: "자동 카운터 직접 변경", fix: "리프 카운터 대신 가챠 규칙 변수를 변경하세요." },
   E009: { title: "잘못된 stat 선언", fix: "통계용 값은 집계 변수로 선언하세요." },
+  E010: { title: "집계 변수 테이블 한도 초과", fix: "집계 변수 max를 줄이거나 갱신식에서 제어 변수·시행 번호 의존을 제거하세요." },
   W001: { title: "자식 확률 보정", fix: "자식 확률 합을 부모 확률 이하로 맞추세요." },
   W002: { title: "그외 항목 자동 생성", fix: "정상 동작이며 수정할 필요가 없습니다." },
   W003: { title: "달성 불가능한 조건", fix: "시행 횟수나 목표 개수를 확인하세요." },
@@ -23,4 +24,5 @@ export const diagnosticHelp: Record<string, { title: string; fix: string }> = {
   W006: { title: "추적 대상 없음", fix: "뽑기 결과 또는 집계 변수 ID를 확인하세요." },
   W007: { title: "지급 시행 슬롯 부족", fix: "maxTrials 또는 지급 시점을 조정하세요." },
   W008: { title: "중복 집계 축 제거", fix: "자동 카운터로 계산되어 별도 상태 축은 만들지 않았습니다." },
+  W009: { title: "큰 집계 변수 테이블", fix: "표시된 제어·시행·max 축을 확인하고 불필요한 의존성이나 상한을 줄이세요." },
 };

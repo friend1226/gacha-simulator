@@ -244,3 +244,20 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
 - v1 모델은 시행 시리즈 기본을 `none`으로 보존하고 v2는 `marginal`로 적용해 하위
   호환 성능 회귀를 막았다. 4스레드 하드-pity 벤치 3회 중앙값은 픽업 315ms,
   결합 18,314ms로 기존 STATUS의 484ms/18,712ms 스트레스 측정 범위와 동등 이상이다.
+
+## 2026-07-29 M9 리뷰 후속
+
+- accumulator 사전계산 테이블을 전개 전에 합산한다. 500,000 엔트리 이상은 축별
+  크기를 포함한 `W009`, 합계 10,000,000 초과는 OOM 방지용 `E010` error로 처리한다.
+- §9.1 MC↔DP 10^6회 Wilson 교차검증에 제어 의존 accumulator packed fast path와
+  `consumesTrial` 지급 slow path 모델을 추가했다.
+- UI 피벗은 엔진의 십진 `display`를 BigInt 가수·지수로 합산하고 Exact 분수도 같은
+  표기로 변환해 `1e-431`급 확률을 0으로 잃지 않는다. 히트맵은 Map 조회를 사용하고
+  행·열 모두 표시 상한과 생략 안내를 적용했으며 대형 배열 `Math.max(...values)`
+  호출을 제거했다.
+- 조건 블록 삭제 시 잔존하던 `run.condition`, 1100px 이하에서 사라지던 파일 작업
+  버튼, `EntityDef.name` dead-code 경고도 함께 정리했다.
+- 검증: Rust 53/53, UI 11/11, strict 타입 검사와 Vite 빌드 통과. 골든
+  `resultSha256` 불변. 최신 WASM 프로덕션 미리보기에서 블루 아카이브 DP 484셀,
+  MC 10만 회 119셀을 실행했고, Exact 극소 모델의 201×201 히트맵에서
+  `1.04618382913e-431` 표시와 브라우저 콘솔 오류 0건을 확인했다.

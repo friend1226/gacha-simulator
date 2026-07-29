@@ -76,6 +76,9 @@ pub struct AccumulatorTable {
     pub control_dependent: Vec<bool>,
 }
 
+const ACCUMULATOR_TABLE_WARNING_ENTRIES: u128 = 500_000;
+const ACCUMULATOR_TABLE_MAX_ENTRIES: u128 = 10_000_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrackedDimension {
     Leaf(usize),
@@ -515,7 +518,6 @@ fn apply_compiled_transitions(
 
 struct EntityDef {
     id: String,
-    name: String,
     program: Program,
     children: Vec<EntityDef>,
     leaf_indices: BTreeSet<usize>,
@@ -1533,7 +1535,6 @@ fn compile_entities(
         });
         result.push(EntityDef {
             id: entity.id.clone(),
-            name: entity.name.clone(),
             program,
             children,
             leaf_indices,
@@ -1784,9 +1785,20 @@ fn compile_accumulator_table(
     max_trials: u32,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> AccumulatorTable {
-    let mut all_entries = Vec::with_capacity(accumulator_ids.len());
-    let mut trial_dependent = Vec::with_capacity(accumulator_ids.len());
-    let mut control_dependent = Vec::with_capacity(accumulator_ids.len());
+    struct AccumulatorSpec {
+        id: String,
+        block_id: Option<String>,
+        clamp_policy: ClampPolicy,
+        rules: Vec<(CompiledPredicate, Program)>,
+        depends_on_trial: bool,
+        depends_on_control: bool,
+        control_states: u64,
+        table_trials: u32,
+        maximum: u32,
+        entry_count: u128,
+    }
+
+    let mut specs = Vec::with_capacity(accumulator_ids.len());
     for (accumulator_index, accumulator_id) in accumulator_ids.iter().enumerate() {
         let var = ir
             .state_vars
@@ -1836,8 +1848,6 @@ fn compile_accumulator_table(
                 .iter()
                 .any(|op| matches!(op, Op::PushVar(name) if control_ids.contains(name)))
         });
-        trial_dependent.push(depends_on_trial);
-        control_dependent.push(depends_on_control);
         let control_states = if depends_on_control {
             control_max.iter().fold(1u64, |states, max| {
                 states.saturating_mul(u64::from(*max) + 1)
@@ -1851,6 +1861,88 @@ fn compile_accumulator_table(
             1
         };
         let maximum = accumulator_max[accumulator_index];
+        let entry_count = u128::from(control_states)
+            .saturating_mul(u128::from(table_trials))
+            .saturating_mul(leaves.len() as u128)
+            .saturating_mul(u128::from(maximum) + 1);
+        specs.push(AccumulatorSpec {
+            id: accumulator_id.clone(),
+            block_id: var.block_id.clone(),
+            clamp_policy: var.clamp_policy,
+            rules,
+            depends_on_trial,
+            depends_on_control,
+            control_states,
+            table_trials,
+            maximum,
+            entry_count,
+        });
+    }
+
+    let total_entries = specs
+        .iter()
+        .fold(0u128, |total, spec| total.saturating_add(spec.entry_count));
+    let axes = specs
+        .iter()
+        .map(|spec| {
+            format!(
+                "{}(control={}, trials={}, leaves={}, current=max+1={}, entries={})",
+                spec.id,
+                spec.control_states,
+                spec.table_trials,
+                leaves.len(),
+                u128::from(spec.maximum) + 1,
+                spec.entry_count,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    if total_entries >= ACCUMULATOR_TABLE_WARNING_ENTRIES {
+        diagnostics.push(warning(
+            "W009",
+            format!(
+                "accumulator precompute table requires {total_entries} entries; axes: {axes}; reduce max or remove control/trial dependency"
+            ),
+            specs.first().and_then(|spec| spec.block_id.clone()),
+        ));
+    }
+
+    let trial_dependent = specs
+        .iter()
+        .map(|spec| spec.depends_on_trial)
+        .collect::<Vec<_>>();
+    let control_dependent = specs
+        .iter()
+        .map(|spec| spec.depends_on_control)
+        .collect::<Vec<_>>();
+    if total_entries > ACCUMULATOR_TABLE_MAX_ENTRIES {
+        diagnostics.push(error(
+            "E010",
+            format!(
+                "accumulator precompute table requires {total_entries} entries, exceeding hard limit {ACCUMULATOR_TABLE_MAX_ENTRIES}; axes: {axes}; reduce max or remove control/trial dependency"
+            ),
+            specs.first().and_then(|spec| spec.block_id.clone()),
+        ));
+        return AccumulatorTable {
+            entries: (0..specs.len()).map(|_| Vec::new()).collect(),
+            trial_dependent,
+            control_dependent,
+        };
+    }
+
+    let mut all_entries = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let AccumulatorSpec {
+            id: accumulator_id,
+            block_id,
+            clamp_policy,
+            rules,
+            depends_on_control,
+            control_states,
+            table_trials,
+            maximum,
+            ..
+        } = spec;
         let mut by_control = Vec::with_capacity(control_states as usize);
         let mut error_reported = false;
         for control_index in 0..control_states {
@@ -1890,7 +1982,7 @@ fn compile_accumulator_table(
                                     diagnostics.push(error(
                                         "E006",
                                         error_value.to_string(),
-                                        var.block_id.clone(),
+                                        block_id.clone(),
                                     ));
                                     error_reported = true;
                                 }
@@ -1898,14 +1990,14 @@ fn compile_accumulator_table(
                             }
                         }
                         let clamped = next < 0 || next > i64::from(maximum);
-                        if clamped && var.clamp_policy == ClampPolicy::Error && !error_reported {
+                        if clamped && clamp_policy == ClampPolicy::Error && !error_reported {
                             diagnostics.push(error(
                                 "E004",
                                 format!(
                                     "accumulator '{}' update can exceed 0..={maximum} with clampPolicy error",
                                     accumulator_id
                                 ),
-                                var.block_id.clone(),
+                                block_id.clone(),
                             ));
                             error_reported = true;
                         }

@@ -132,7 +132,9 @@ button { cursor: pointer; }
 
 @media (max-width: 1100px) {
   .app-header { gap: 8px; padding: 0 10px; }
-  .header-actions button, .file-button, .source-badge { display: none; }
+  .header-actions button, .file-button { width: 34px; padding: 0; justify-content: center; gap: 0; overflow: hidden; white-space: nowrap; font-size: 0; }
+  .header-actions select { max-width: 160px; }
+  .source-badge { display: none; }
   .top-tabs button { padding: 0 9px; }
   .run-toolbar { grid-template-columns: repeat(3, 1fr); }
 }

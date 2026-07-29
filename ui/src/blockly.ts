@@ -230,6 +230,9 @@ export function workspaceToIr(workspace: Blockly.WorkspaceSvg, previous: ModelIr
       ],
     };
   }
+  const run = { ...previous.run };
+  if (condition) run.condition = condition;
+  else delete run.condition;
   return {
     ...previous,
     irVersion: 2,
@@ -238,7 +241,7 @@ export function workspaceToIr(workspace: Blockly.WorkspaceSvg, previous: ModelIr
     probRules,
     transitions,
     triggers,
-    run: { ...previous.run, ...(condition ? { condition } : {}) },
+    run,
   };
 }
 

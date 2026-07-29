@@ -1,6 +1,6 @@
 import { Copy, Download, Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { defaultAxes, pivot, probabilityOf, toCsv, type Axis, type AxisRole } from "../pivot";
+import { defaultAxes, pivot, pivotKey, probabilityOf, toCsv, type Axis, type AxisRole, type PivotCell } from "../pivot";
 import { engineLabels } from "../labels";
 import { formatProbability, type AppSettings } from "../settings";
 import type { EngineResult, ModelIr, ResultCell } from "../types";
@@ -110,7 +110,11 @@ function AxisControls({ axes, cells, onChange }: { axes: Axis[]; cells: ResultCe
 function ResultView({ result, axes, settings }: { result: EngineResult; axes: Axis[]; settings: AppSettings }) {
   const table = useMemo(() => pivot(result.joint, axes), [result, axes]);
   const [selected, setSelected] = useState<{ row: number; col: number }>();
-  const max = Math.max(...table.cells.map((cell) => cell.probability), 0);
+  const max = table.cells.reduce((largest, cell) => Math.max(largest, cell.probability), 0);
+  const visibleRows = table.rows.slice(0, settings.maxRows);
+  const visibleCols = table.cols.slice(0, settings.maxRows);
+  const hiddenRows = table.rows.length - visibleRows.length;
+  const hiddenCols = table.cols.length - visibleCols.length;
   const title = engineLabels[result.engine === "Exact" ? "Exact" : result.engine];
   function download(name: string, contents: string, type: string) {
     const url = URL.createObjectURL(new Blob([contents], { type }));
@@ -131,7 +135,7 @@ function ResultView({ result, axes, settings }: { result: EngineResult; axes: Ax
     : selectedSources.length === 1 ? selectedSources[0]?.interval : undefined;
   const selectedExact = selectedSources.length === 1
     ? selectedSources[0].display ?? (selectedSources[0].numerator && selectedSources[0].denominator ? `${selectedSources[0].numerator}/${selectedSources[0].denominator}` : undefined)
-    : table.cells.find((cell) => cell.row === selected?.row && cell.col === selected?.col)?.display;
+    : selected ? table.lookup.get(pivotKey(selected.row, selected.col))?.display : undefined;
   return (
     <article className="result-card">
       <header><div><h2>{title}</h2><p>{result.elapsedMs}ms · {result.numeric}{result.runs ? ` · ${result.runs.toLocaleString()}회 · seed ${result.seed}` : ""}{result.modelHash ? ` · ${result.modelHash.slice(0, 12)}` : ""}</p></div>
@@ -141,13 +145,14 @@ function ResultView({ result, axes, settings }: { result: EngineResult; axes: Ax
       {result.clampEvents > 0 && <p className="warning">확률 보정 발생: {result.clampEvents}회</p>}
       {result.accumulatorClampEvents > 0 && <p className="warning">집계 변수 상한 보정: {result.accumulatorClampEvents}회</p>}
       {table.colAxis ? (
-        <div className="heatmap-wrap"><table className="heatmap"><caption>{table.rowAxis?.label} × {table.colAxis.label} 결합 확률</caption><thead><tr><th scope="col">{table.rowAxis?.label}</th>{table.cols.map((col) => <th scope="col" key={col}>{col}</th>)}</tr></thead>
-          <tbody>{table.rows.slice(0, settings.maxRows).map((row) => <tr key={row}><th scope="row">{row}</th>{table.cols.map((col) => {
-            const cell = table.cells.find((item) => item.row === row && item.col === col);
+        <div className="heatmap-wrap"><table className="heatmap"><caption>{table.rowAxis?.label} × {table.colAxis.label} 결합 확률</caption><thead><tr><th scope="col">{table.rowAxis?.label}</th>{visibleCols.map((col) => <th scope="col" key={col}>{col}</th>)}</tr></thead>
+          <tbody>{visibleRows.map((row) => <tr key={row}><th scope="row">{row}</th>{visibleCols.map((col) => {
+            const cell = table.lookup.get(pivotKey(row, col));
             const probability = cell?.probability ?? 0;
-            return <td key={col} style={{ backgroundColor: `rgba(122,92,240,${max ? 0.08 + probability / max * 0.72 : 0})` }}><button title={cell?.display ?? "0"} onClick={() => setSelected({ row, col })}>{formatProbability(probability, settings.probabilityFormat)}</button></td>;
+            return <td key={col} style={{ backgroundColor: `rgba(122,92,240,${max ? 0.08 + probability / max * 0.72 : 0})` }}><button title={cell?.display ?? "0"} onClick={() => setSelected({ row, col })}>{formatPivotCell(cell, settings.probabilityFormat)}</button></td>;
           })}</tr>)}</tbody></table></div>
-      ) : <BarChart cells={table.cells.map((cell) => ({ value: cell.row, probability: cell.probability }))} format={settings.probabilityFormat} />}
+      ) : <BarChart cells={table.cells.map((cell) => ({ value: cell.row, probability: cell.probability, display: cell.display }))} format={settings.probabilityFormat} />}
+      {(hiddenRows > 0 || hiddenCols > 0) && <p className="warning" role="status">표시 한도 {settings.maxRows.toLocaleString()}개 적용: {hiddenRows > 0 ? `행 ${hiddenRows.toLocaleString()}개` : ""}{hiddenRows > 0 && hiddenCols > 0 ? " · " : ""}{hiddenCols > 0 ? `열 ${hiddenCols.toLocaleString()}개` : ""}가 생략되었습니다. CSV 내보내기에는 전체 데이터가 포함됩니다.</p>}
       {selected && <div className="cell-detail" role="status"><b>{table.rowAxis?.label ?? "값"} {selected.row}{table.colAxis ? ` · ${table.colAxis.label} ${selected.col}` : ""}</b>
         <span>정확 표기: <code>{selectedExact ?? "0"}</code>{selectedSources.length > 1 && ` · ${selectedSources.length}개 원본 셀 집계`}</span>
         {selectedInterval && <span>오차 범위 (95%): <code>{selectedInterval.lower.toExponential(8)} – {selectedInterval.upper.toExponential(8)}</code> · 관측 {selectedOccurrences.toLocaleString()}회</span>}
@@ -156,6 +161,14 @@ function ResultView({ result, axes, settings }: { result: EngineResult; axes: Ax
       <p className="mass">현재 슬라이스 확률 합: {formatProbability(table.total, settings.probabilityFormat)}</p>
     </article>
   );
+}
+
+function formatPivotCell(cell: PivotCell | undefined, format: AppSettings["probabilityFormat"]): string {
+  if (!cell) return "0";
+  if (format === "scientific" || (cell.probability === 0 && cell.display !== "0")) {
+    return cell.display;
+  }
+  return formatProbability(cell.probability, format);
 }
 
 function wilson(successes: number, total: number) {
@@ -169,15 +182,18 @@ function wilson(successes: number, total: number) {
   return { estimate, lower: successes === 0 ? 0 : Math.max(0, center - margin), upper: successes === total ? 1 : Math.min(1, center + margin) };
 }
 
-function BarChart({ cells, format, cdf = false }: { cells: Array<{ value: number; probability: number }>; format: AppSettings["probabilityFormat"]; cdf?: boolean }) {
+function BarChart({ cells, format, cdf = false }: { cells: Array<{ value: number; probability: number; display?: string }>; format: AppSettings["probabilityFormat"]; cdf?: boolean }) {
   let running = 0;
   const values = cells.map((cell) => ({ ...cell, probability: cdf ? (running += cell.probability) : cell.probability }));
-  const max = Math.max(...values.map((cell) => cell.probability), Number.MIN_VALUE);
+  const max = values.reduce((largest, cell) => Math.max(largest, cell.probability), Number.MIN_VALUE);
   const width = Math.max(420, values.length * 34);
   return <div className="chart-scroll"><svg className="bar-chart" role="img" aria-label={cdf ? "누적 확률 차트" : "확률 막대 차트"} viewBox={`0 0 ${width} 230`}>
     {values.map((cell, index) => {
       const height = cell.probability / max * 170;
-      return <g key={cell.value} transform={`translate(${index * 34 + 8},0)`}><title>{cell.value}: {formatProbability(cell.probability, format)}</title><rect x="0" y={190 - height} width="24" height={height} rx="3" /><text x="12" y="210" textAnchor="middle">{cell.value}</text></g>;
+      const display = !cdf && (format === "scientific" || (cell.probability === 0 && cell.display && cell.display !== "0"))
+        ? cell.display
+        : formatProbability(cell.probability, format);
+      return <g key={cell.value} transform={`translate(${index * 34 + 8},0)`}><title>{cell.value}: {display}</title><rect x="0" y={190 - height} width="24" height={height} rx="3" /><text x="12" y="210" textAnchor="middle">{cell.value}</text></g>;
     })}
   </svg></div>;
 }
@@ -193,8 +209,8 @@ function SeriesComparison({ dp, mc, settings }: { dp?: EngineResult; mc?: Engine
   })) ?? [];
   const dpPoints = expected(dp); const mcPoints = expected(mc);
   const all = [...dpPoints, ...mcPoints];
-  const maxTrial = Math.max(...all.map((point) => point.trial), 1);
-  const maxValue = Math.max(...all.map((point) => point.value), Number.MIN_VALUE);
+  const maxTrial = all.reduce((largest, point) => Math.max(largest, point.trial), 1);
+  const maxValue = all.reduce((largest, point) => Math.max(largest, point.value), Number.MIN_VALUE);
   const path = (series: typeof all) => series.map((point, index) => `${index ? "L" : "M"} ${30 + point.trial / maxTrial * 720} ${210 - point.value / maxValue * 170}`).join(" ");
   return <article className="series-card"><header><div><h2>시행 수에 따른 추이</h2><p>결측 시행 번호는 데이터 점을 만들지 않습니다.</p></div><select value={axis} onChange={(event) => setAxis(Number(event.target.value))}>{axes.map((item, index) => <option value={index} key={item.id}>{item.id}</option>)}</select></header>
     <svg viewBox="0 0 780 235" role="img" aria-label="시행별 기대 개수"><path className="grid-line" d="M30 210 H750 M30 40 V210" />{dpPoints.length > 0 && <path className="dp-line" d={path(dpPoints)} />}{mcPoints.length > 0 && <path className="mc-line" d={path(mcPoints)} />}<text x="30" y="228">1</text><text x="725" y="228">{maxTrial}</text></svg>
