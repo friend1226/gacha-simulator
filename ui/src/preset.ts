@@ -1,3 +1,4 @@
+import arknightsFirstTenSource from "../../presets/arknights-first-ten-guarantee.json";
 import blueArchiveSource from "../../presets/blue-archive-pickup.json";
 import simplePitySource from "../../presets/simple-pity.json";
 import type { ModelIr } from "./types";
@@ -22,6 +23,7 @@ function entry(id: string, source: unknown): PresetEntry {
 
 export const presets = [
   entry("blue-archive-pickup", blueArchiveSource),
+  entry("arknights-first-ten-guarantee", arknightsFirstTenSource),
   entry("simple-pity", simplePitySource),
 ];
 
