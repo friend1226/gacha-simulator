@@ -583,3 +583,18 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   `회이고` 블록 4개와 `또는` 전이 블록 1개가 렌더링되는 것을 확인했다.
   375px에서 `innerWidth=375`, `clientWidth=360`, `scrollWidth=360`이었고
   브라우저 개발자 로그는 0건이었다.
+
+## 2026-07-30 BACKLOG C — UI 유지보수
+
+- Vitest를 2.1.9에서 4.1.10으로 올리고 lockfile에서 취약한 중첩
+  Vite/esbuild 의존성을 제거했다. clean `npm ci` 뒤 `npm audit`은 취약점
+  0건이고, `import.meta.glob`을 쓰는 Blockly·라벨 테스트를 포함해 9개 파일의
+  29/29 테스트가 Vitest 4에서 통과했다.
+- 모바일 안내 여부를 TS의 별도 `620px` 미디어 쿼리로 판단하지 않고, CSS의
+  단일 미디어 쿼리가 설정하는 `--gacha-mobile-layout` 플래그를 읽도록 바꿨다.
+  따라서 grid track 높이 `620px`은 그대로 유지하면서 반응형 기준 숫자의
+  중복을 없앴다.
+- UI strict 타입 검사와 1,604개 모듈의 프로덕션 빌드가 통과했다. 실제
+  브라우저에서 데스크톱 안내 0건, 375px의 CSS 플래그 `1`과 안내 1건,
+  닫은 뒤 새로고침 시 안내 0건을 확인했다. 375px에서 `innerWidth=375`,
+  `clientWidth=360`, `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.

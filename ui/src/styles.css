@@ -1,6 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+KR:wght@400;500;600;700&display=swap");
 
-:root { font-family: "Noto Sans KR", system-ui, sans-serif; color: #e9edf5; background: #0d0f14; font-synthesis: none; }
+:root { --gacha-mobile-layout: 0; font-family: "Noto Sans KR", system-ui, sans-serif; color: #e9edf5; background: #0d0f14; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; min-height: 100dvh; background: #0d0f14; }
 button, select, textarea, input { font: inherit; color: inherit; }
@@ -173,6 +173,7 @@ button { cursor: pointer; }
   .settings-grid, .help-columns, .glossary, .diagnostic-help { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
+  :root { --gacha-mobile-layout: 1; }
   .brand b { display: none; }
   .header-actions { order: 2; width: 100%; }
   .header-actions select { flex: 1 1 auto; width: 0; max-width: none; }
