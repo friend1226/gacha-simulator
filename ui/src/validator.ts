@@ -1,5 +1,9 @@
 import type { Diagnostic, Entity, LeafView, ModelIr, ValidationView } from "./types";
 
+// Keep these thresholds in sync with crates/gacha-core/src/compile.rs.
+export const ACCUMULATOR_TABLE_WARNING_ENTRIES = 500_000;
+export const ACCUMULATOR_TABLE_MAX_ENTRIES = 10_000_000;
+
 export function parseExactLiteral(value: string): { numerator: bigint; denominator: bigint } {
   const source = value.trim();
   if (source.includes("/")) {
@@ -40,6 +44,7 @@ export function validateLocally(ir: ModelIr): ValidationView {
   const diagnostics: Diagnostic[] = [];
   const ids = new Set<string>();
   const leaves: LeafView[] = [];
+  const leafAncestors = new Map<string, string[]>();
 
   function walk(entity: Entity, ancestors: string[]): number {
     if (ids.has(entity.id)) {
@@ -58,6 +63,7 @@ export function validateLocally(ir: ModelIr): ValidationView {
     const children = entity.children ?? [];
     if (!children.length) {
       leaves.push({ id: entity.id, name: entity.name, probability });
+      leafAncestors.set(entity.id, ancestors);
       return probability;
     }
     const childStart = leaves.length;
@@ -74,12 +80,14 @@ export function validateLocally(ir: ModelIr): ValidationView {
       name: `${entity.name}(전용)`,
       probability: Math.max(0, probability - Math.min(childTotal, probability)),
     });
+    leafAncestors.set(`${entity.id}__self`, [...ancestors, entity.id]);
     return Math.max(probability, ir.nestingPolicy === "expandParent" ? childTotal : probability);
   }
 
   const topTotal = ir.entities.reduce((sum, entity) => sum + walk(entity, []), 0);
   if (topTotal > 1 + 1e-15) diagnostics.push({ code: "E003", severity: "error", message: "최상위 확률 합이 1을 초과합니다" });
   leaves.push({ id: "__other__", name: "그외", probability: Math.max(0, 1 - topTotal) });
+  leafAncestors.set("__other__", []);
   diagnostics.push({ code: "W002", severity: "info", message: "남는 확률은 ‘그외’ 리프로 자동 편입됩니다" });
 
   let controlStates = 1;
@@ -98,5 +106,104 @@ export function validateLocally(ir: ModelIr): ValidationView {
   const estimatedStates = controlStates * accumulatorStates
     * (ir.run.maxTrials + 1) ** Math.max(0, ir.run.trackJoint.length - 1);
   if (estimatedStates > 50_000_000) diagnostics.push({ code: "W004", severity: "warning", message: "예상 상태 공간이 DP 권장 한계를 초과합니다" });
+  validateAccumulatorTable(ir, leaves, leafAncestors, controlStates, diagnostics);
   return { diagnostics, leaves, controlStates, estimatedStates, exactAvailable: true };
+}
+
+function validateAccumulatorTable(
+  ir: ModelIr,
+  leaves: LeafView[],
+  leafAncestors: Map<string, string[]>,
+  controlStates: number,
+  diagnostics: Diagnostic[],
+) {
+  const controlIds = new Set(ir.stateVars.filter((variable) => variable.role === "control").map((variable) => variable.id));
+  const specs = ir.stateVars
+    .filter((variable) => variable.role === "accumulator"
+      && Number.isInteger(variable.max)
+      && variable.max !== undefined
+      && variable.max >= 0
+      && !isDerivedLeafCounter(variable, ir, leaves, leafAncestors))
+    .map((variable) => {
+      const expressions = variable.update?.map((update) => update.set) ?? [];
+      const dependsOnTrial = expressions.some((expression) => expressionHasTrial(expression));
+      const dependsOnControl = expressions.some((expression) => expressionUsesControl(expression, controlIds));
+      const controls = dependsOnControl ? controlStates : 1;
+      const trials = dependsOnTrial ? Math.max(1, ir.run.maxTrials) : 1;
+      const entries = controls * trials * leaves.length * ((variable.max ?? 0) + 1);
+      return { variable, controls, trials, entries };
+    });
+  const totalEntries = specs.reduce((total, spec) => total + spec.entries, 0);
+  if (totalEntries < ACCUMULATOR_TABLE_WARNING_ENTRIES) return;
+
+  const axes = specs.map(({ variable, controls, trials, entries }) =>
+    `${variable.id}(제어=${controls}, 시행=${trials}, 리프=${leaves.length}, 현재값=max+1=${(variable.max ?? 0) + 1}, 엔트리=${entries})`
+  ).join("; ");
+  const blockId = specs[0]?.variable.blockId;
+  if (totalEntries > ACCUMULATOR_TABLE_MAX_ENTRIES) {
+    diagnostics.push({
+      code: "E010",
+      severity: "error",
+      message: `집계 변수 사전계산 테이블 ${totalEntries.toLocaleString()}개가 한도 ${ACCUMULATOR_TABLE_MAX_ENTRIES.toLocaleString()}개를 초과합니다: ${axes}`,
+      blockId,
+    });
+  } else {
+    diagnostics.push({
+      code: "W009",
+      severity: "warning",
+      message: `집계 변수 사전계산 테이블에 ${totalEntries.toLocaleString()}개 엔트리가 필요합니다: ${axes}`,
+      blockId,
+    });
+  }
+}
+
+function expressionHasTrial(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(expressionHasTrial);
+  const object = value as Record<string, unknown>;
+  return Object.prototype.hasOwnProperty.call(object, "trial")
+    || Object.values(object).some(expressionHasTrial);
+}
+
+function expressionUsesControl(value: unknown, controlIds: Set<string>): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((item) => expressionUsesControl(item, controlIds));
+  const object = value as Record<string, unknown>;
+  return (typeof object.var === "string" && controlIds.has(object.var))
+    || Object.values(object).some((item) => expressionUsesControl(item, controlIds));
+}
+
+function isDerivedLeafCounter(
+  variable: ModelIr["stateVars"][number],
+  ir: ModelIr,
+  leaves: LeafView[],
+  leafAncestors: Map<string, string[]>,
+): boolean {
+  if (variable.init !== 0 || variable.update?.length !== 1) return false;
+  const update = variable.update[0];
+  const target = typeof update.when.leafOf === "string"
+    ? update.when.leafOf
+    : typeof update.when.leafIs === "string" ? update.when.leafIs : undefined;
+  const add = update.set.add;
+  if (!target || !Array.isArray(add) || add.length !== 2) return false;
+  const isSelf = (value: unknown) => Boolean(value && typeof value === "object"
+    && (value as Record<string, unknown>).var === variable.id);
+  const isOne = (value: unknown) => Boolean(value && typeof value === "object"
+    && (value as Record<string, unknown>).lit === "1");
+  if (!((isSelf(add[0]) && isOne(add[1])) || (isOne(add[0]) && isSelf(add[1])))) return false;
+
+  const matching = new Set(leaves
+    .filter((leaf) => leaf.id === target || leafAncestors.get(leaf.id)?.includes(target))
+    .map((leaf) => leaf.id));
+  if (!matching.size) return false;
+  const granted = ir.triggers.reduce<number>((total, trigger) => {
+    if (!trigger || typeof trigger !== "object") return total;
+    const grant = (trigger as Record<string, unknown>).grant;
+    if (!grant || typeof grant !== "object") return total;
+    const record = grant as Record<string, unknown>;
+    return total + (typeof record.leaf === "string" && matching.has(record.leaf) && typeof record.amount === "number"
+      ? record.amount
+      : 0);
+  }, 0);
+  return (variable.max ?? -1) >= ir.run.maxTrials + granted;
 }
