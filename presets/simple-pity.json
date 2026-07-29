@@ -7,7 +7,7 @@
     "confidence": "community-estimate",
     "notes": "동적 확률 및 전이 검증용"
   },
-  "irVersion": 1,
+  "irVersion": 2,
   "name": "90회 하드 천장",
   "entities": [
     { "id": "rare", "name": "희귀", "prob": { "lit": "0.01" } }
@@ -38,7 +38,7 @@
     "maxTrials": 180,
     "trackJoint": ["rare"],
     "numeric": "scaled",
+    "trialSeries": "marginal",
     "condition": { "ge": [{ "var": "nRare" }, { "lit": "1" }] }
   }
 }
-

@@ -213,3 +213,34 @@ PR #2(`fix: wire exact backend`)를 이 환경에서 직접 체크아웃해 검�
   테스트하려면 `npm run build && npm run preview`를 사용해야 한다 — README/사용 문서에 반영.
 - `cargo test --workspace --exclude gacha-tauri` 전체 통과, `ui` `npx tsc --noEmit`/`npm test`
   4/4 통과, `npm run build` 후 `dist/wasm/` 정상 생성 확인.
+
+## 2026-07-29 M9 완료 — 집계 변수, 시행 시리즈, 사용자 결과 뷰
+
+- Model IR v2에 `role: accumulator`, 상한·표시명·리프별 갱신·clamp 정책을 추가하고
+  v1 입력은 계속 허용했다. 갱신은 제어/시행 의존성을 접은 사전계산 테이블을 사용하며,
+  packed state의 제어·집계·리프 카운트 구획을 분리했다.
+- 자동 리프 카운터와 같은 집계 변수는 W008로 상태 없는 파생 축으로 강등한다.
+  E009로 사용자의 `role: stat` 선언을 별도 거부하고, accumulator saturate는
+  `accumulatorClampEvents`로 MC/Scaled/Exact 결과에 보고한다.
+- `trialSeries`의 `none`/`marginal`/`checkpoints`를 세 엔진에 배선했다. 주변분포는
+  명시적 시행 번호를 가지며 MC 셀은 반복 수 기준 Wilson 구간을 함께 반환한다.
+- UI를 모델/결과/도움말/설정 탭으로 분리했다. 결과 탭은 행·열·집계·필터 피벗,
+  1차원 SVG 막대와 2차원 히트맵, DP/MC 비교, 시행별 추이, 첫 달성 분포,
+  CSV/JSON 내보내기와 재현 메타데이터를 제공한다.
+- Blockly 모델 컨테이너와 집계 변수 블록을 추가하고 JSON→블록 복원에서 확률 규칙,
+  전이, 트리거, 조건을 함께 복원한다. 프리셋은 `presets/*.json`을 빌드 타임에 읽고
+  출처 배지를 표시한다.
+- 설정은 버전 있는 localStorage 스키마로 효과음 볼륨, 기본 엔진 값, 확률 표기와 표
+  행 제한을 저장한다. 모델도 자동 저장하고 JSON 열기/저장을 지원한다.
+- 집계/시리즈 코어 회귀 5개와 피벗/설정/진단 라벨/첫 달성 UI 단위 테스트 6개를 추가했다. 프리셋은
+  v2로 올렸으며 골든의 계산 결과 SHA-256은 그대로이고 원본 프리셋 SHA-256만 갱신했다.
+- 남은 차이는 DESIGN §13.1에 기록했다: 일반 파생 accumulator 분류와 WASM
+  Web Worker 진행률/취소.
+- `cargo test --workspace --exclude gacha-tauri` 전체 통과, UI strict 타입 검사와
+  vitest 10/10, Vite 프로덕션 빌드가 통과했다.
+- 새 WASM을 빌드해 실제 브라우저 프로덕션 미리보기에서 블루 아카이브 DP
+  484셀/시행 시리즈(41ms), MC 10만 회, 2개 비교 히트맵, DP 정확 표기와 MC Wilson
+  셀 상세, 도움말 18개 진단, 설정 6개 항목, 800px 반응형 무가로스크롤을 확인했다.
+- v1 모델은 시행 시리즈 기본을 `none`으로 보존하고 v2는 `marginal`로 적용해 하위
+  호환 성능 회귀를 막았다. 4스레드 하드-pity 벤치 3회 중앙값은 픽업 315ms,
+  결합 18,314ms로 기존 STATUS의 484ms/18,712ms 스트레스 측정 범위와 동등 이상이다.

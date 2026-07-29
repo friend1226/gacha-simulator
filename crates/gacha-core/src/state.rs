@@ -13,17 +13,29 @@ pub enum StateCodecError {
 #[derive(Debug, Clone)]
 pub struct StateCodec {
     control_max: Vec<u32>,
+    accumulator_max: Vec<u32>,
     count_max: Vec<u32>,
     strides: Vec<u64>,
     control_states: u64,
+    accumulator_offset: usize,
+    count_offset: usize,
     state_space: u64,
 }
 
 impl StateCodec {
     pub fn new(control_max: &[u32], count_max: &[u32]) -> Result<Self, StateCodecError> {
-        let mut strides = Vec::with_capacity(control_max.len() + count_max.len());
+        Self::with_accumulators(control_max, &[], count_max)
+    }
+
+    pub fn with_accumulators(
+        control_max: &[u32],
+        accumulator_max: &[u32],
+        count_max: &[u32],
+    ) -> Result<Self, StateCodecError> {
+        let mut strides =
+            Vec::with_capacity(control_max.len() + accumulator_max.len() + count_max.len());
         let mut state_space = 1u64;
-        for maximum in control_max.iter().chain(count_max) {
+        for maximum in control_max.iter().chain(accumulator_max).chain(count_max) {
             strides.push(state_space);
             state_space = state_space
                 .checked_mul(u64::from(*maximum) + 1)
@@ -36,22 +48,43 @@ impl StateCodec {
         })?;
         Ok(Self {
             control_max: control_max.to_vec(),
+            accumulator_max: accumulator_max.to_vec(),
             count_max: count_max.to_vec(),
             strides,
             control_states,
+            accumulator_offset: control_max.len(),
+            count_offset: control_max.len() + accumulator_max.len(),
             state_space,
         })
     }
 
     pub fn encode(&self, control: &[u32], counts: &[u32]) -> Result<u64, StateCodecError> {
-        if control.len() != self.control_max.len() || counts.len() != self.count_max.len() {
+        self.encode_full(control, &[], counts)
+    }
+
+    pub fn encode_full(
+        &self,
+        control: &[u32],
+        accumulators: &[u32],
+        counts: &[u32],
+    ) -> Result<u64, StateCodecError> {
+        if control.len() != self.control_max.len()
+            || accumulators.len() != self.accumulator_max.len()
+            || counts.len() != self.count_max.len()
+        {
             return Err(StateCodecError::DimensionMismatch);
         }
         let mut index = 0u64;
         for ((value, maximum), stride) in control
             .iter()
+            .chain(accumulators)
             .chain(counts)
-            .zip(self.control_max.iter().chain(&self.count_max))
+            .zip(
+                self.control_max
+                    .iter()
+                    .chain(&self.accumulator_max)
+                    .chain(&self.count_max),
+            )
             .zip(&self.strides)
         {
             if value > maximum {
@@ -67,17 +100,51 @@ impl StateCodec {
 
     pub fn decode(&self, index: u64) -> (Vec<u32>, Vec<u32>) {
         let mut control = vec![0; self.control_max.len()];
+        let mut accumulators = vec![0; self.accumulator_max.len()];
         let mut counts = vec![0; self.count_max.len()];
-        self.decode_into(index, &mut control, &mut counts);
+        self.decode_full_into(index, &mut control, &mut accumulators, &mut counts);
         (control, counts)
     }
 
     pub fn decode_into(&self, index: u64, control: &mut [u32], counts: &mut [u32]) {
+        let mut accumulators = vec![0; self.accumulator_max.len()];
+        self.decode_full_into(index, control, &mut accumulators, counts);
+    }
+
+    pub fn decode_full(&self, index: u64) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
+        let mut control = vec![0; self.control_max.len()];
+        let mut accumulators = vec![0; self.accumulator_max.len()];
+        let mut counts = vec![0; self.count_max.len()];
+        self.decode_full_into(index, &mut control, &mut accumulators, &mut counts);
+        (control, accumulators, counts)
+    }
+
+    pub fn decode_full_into(
+        &self,
+        index: u64,
+        control: &mut [u32],
+        accumulators: &mut [u32],
+        counts: &mut [u32],
+    ) {
         debug_assert!(index < self.state_space);
-        assert_eq!(control.len(), self.control_max.len(), "control buffer length");
+        assert_eq!(
+            control.len(),
+            self.control_max.len(),
+            "control buffer length"
+        );
+        assert_eq!(
+            accumulators.len(),
+            self.accumulator_max.len(),
+            "accumulator buffer length"
+        );
         assert_eq!(counts.len(), self.count_max.len(), "count buffer length");
         let mut remaining = index;
         for (value, maximum) in control.iter_mut().zip(&self.control_max) {
+            let modulus = u64::from(*maximum) + 1;
+            *value = (remaining % modulus) as u32;
+            remaining /= modulus;
+        }
+        for (value, maximum) in accumulators.iter_mut().zip(&self.accumulator_max) {
             let modulus = u64::from(*maximum) + 1;
             *value = (remaining % modulus) as u32;
             remaining /= modulus;
@@ -98,7 +165,10 @@ impl StateCodec {
     }
 
     pub fn replace_control_index(&self, state: u64, control_index: usize) -> u64 {
-        debug_assert!(state < self.state_space, "packed state is outside the codec state space");
+        debug_assert!(
+            state < self.state_space,
+            "packed state is outside the codec state space"
+        );
         debug_assert!(
             control_index < self.control_states as usize,
             "control index is outside the codec control state space"
@@ -107,10 +177,16 @@ impl StateCodec {
     }
 
     pub fn increment_count(&self, state: u64, position: usize) -> u64 {
-        debug_assert!(state < self.state_space, "packed state is outside the codec state space");
-        debug_assert!(position < self.count_max.len(), "count position is outside the codec");
+        debug_assert!(
+            state < self.state_space,
+            "packed state is outside the codec state space"
+        );
+        debug_assert!(
+            position < self.count_max.len(),
+            "count position is outside the codec"
+        );
         let maximum = self.count_max[position];
-        let stride = self.strides[self.control_max.len() + position];
+        let stride = self.strides[self.count_offset + position];
         let current = (state / stride) % (u64::from(maximum) + 1);
         debug_assert!(
             current < u64::from(maximum),
@@ -119,8 +195,48 @@ impl StateCodec {
         state + stride
     }
 
-    pub fn control_len(&self) -> usize { self.control_max.len() }
-    pub fn count_len(&self) -> usize { self.count_max.len() }
+    pub fn accumulator_value(&self, state: u64, position: usize) -> u32 {
+        debug_assert!(
+            state < self.state_space,
+            "packed state is outside the codec state space"
+        );
+        debug_assert!(
+            position < self.accumulator_max.len(),
+            "accumulator position is outside the codec"
+        );
+        let stride = self.strides[self.accumulator_offset + position];
+        ((state / stride) % (u64::from(self.accumulator_max[position]) + 1)) as u32
+    }
+
+    pub fn replace_accumulator_index(&self, state: u64, position: usize, value: u32) -> u64 {
+        debug_assert!(
+            state < self.state_space,
+            "packed state is outside the codec state space"
+        );
+        debug_assert!(
+            position < self.accumulator_max.len(),
+            "accumulator position is outside the codec"
+        );
+        let maximum = self.accumulator_max[position];
+        debug_assert!(
+            value <= maximum,
+            "accumulator value exceeds its packed field"
+        );
+        let stride = self.strides[self.accumulator_offset + position];
+        let radix = u64::from(maximum) + 1;
+        let current = (state / stride) % radix;
+        state - current * stride + u64::from(value) * stride
+    }
+
+    pub fn control_len(&self) -> usize {
+        self.control_max.len()
+    }
+    pub fn accumulator_len(&self) -> usize {
+        self.accumulator_max.len()
+    }
+    pub fn count_len(&self) -> usize {
+        self.count_max.len()
+    }
 }
 
 #[cfg(test)]
@@ -156,6 +272,16 @@ mod tests {
                 maximum: 1,
             }),
         );
+    }
+
+    #[test]
+    fn accumulator_digits_are_independent_from_control_and_counts() {
+        let codec = StateCodec::with_accumulators(&[2], &[4, 6], &[3]).unwrap();
+        let state = codec.encode_full(&[1], &[2, 5], &[3]).unwrap();
+        assert_eq!(codec.decode_full(state), (vec![1], vec![2, 5], vec![3]));
+        let replaced = codec.replace_accumulator_index(state, 0, 4);
+        assert_eq!(codec.decode_full(replaced), (vec![1], vec![4, 5], vec![3]));
+        assert_eq!(codec.control_index(replaced), 1);
     }
 
     #[test]

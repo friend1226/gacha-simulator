@@ -53,6 +53,12 @@ pub struct StateVar {
     pub max: Option<u32>,
     pub role: StateRole,
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub update: Vec<AccumulatorUpdate>,
+    #[serde(default)]
+    pub clamp_policy: ClampPolicy,
+    #[serde(default)]
     pub block_id: Option<String>,
 }
 
@@ -61,6 +67,22 @@ pub struct StateVar {
 pub enum StateRole {
     Control,
     Stat,
+    Accumulator,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccumulatorUpdate {
+    pub when: LeafPredicate,
+    pub set: Expr,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClampPolicy {
+    #[default]
+    Saturate,
+    Error,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,11 +106,23 @@ pub struct Transition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum LeafPredicate {
-    LeafOf { #[serde(rename = "leafOf")] leaf_of: String },
-    LeafIs { #[serde(rename = "leafIs")] leaf_is: String },
-    Not { not: Box<LeafPredicate> },
-    And { and: Vec<LeafPredicate> },
-    Or { or: Vec<LeafPredicate> },
+    LeafOf {
+        #[serde(rename = "leafOf")]
+        leaf_of: String,
+    },
+    LeafIs {
+        #[serde(rename = "leafIs")]
+        leaf_is: String,
+    },
+    Not {
+        not: Box<LeafPredicate>,
+    },
+    And {
+        and: Vec<LeafPredicate>,
+    },
+    Or {
+        or: Vec<LeafPredicate>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,8 +155,12 @@ pub struct Grant {
     pub applies_transitions: bool,
 }
 
-fn one() -> u32 { 1 }
-fn default_true() -> bool { true }
+fn one() -> u32 {
+    1
+}
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -134,6 +172,18 @@ pub struct RunConfig {
     pub numeric: NumericBackend,
     #[serde(default)]
     pub condition: Option<Expr>,
+    #[serde(default)]
+    pub trial_series: Option<TrialSeriesMode>,
+    #[serde(default)]
+    pub series_checkpoints: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TrialSeriesMode {
+    None,
+    Marginal,
+    Checkpoints,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,4 +194,3 @@ pub enum NumericBackend {
     Scaled,
     Exact,
 }
-

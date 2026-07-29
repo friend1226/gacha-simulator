@@ -73,14 +73,20 @@ fn e002_uses_control_bounds_without_false_positive_for_correlated_terms() {
         state_vars.clone(),
     );
     let error = compile(&negative).expect_err("bounded affine expression can be negative");
-    assert!(error.diagnostics.iter().any(|diagnostic| diagnostic.code == "E002"));
+    assert!(error
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E002"));
 
     let correlated = base_model(
         json!({"sub": [{"var": "pity"}, {"var": "pity"}]}),
         state_vars,
     );
     let model = compile(&correlated).expect("identical correlated terms cancel to zero");
-    assert!(!model.diagnostics.iter().any(|diagnostic| diagnostic.code == "E002"));
+    assert!(!model
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E002"));
 
     let conditional = base_model(
         json!({
@@ -95,9 +101,12 @@ fn e002_uses_control_bounds_without_false_positive_for_correlated_terms() {
             "role": "control"
         })],
     );
-    let error = compile(&conditional)
-        .expect_err("reachable negative conditional branch must be rejected");
-    assert!(error.diagnostics.iter().any(|diagnostic| diagnostic.code == "E002"));
+    let error =
+        compile(&conditional).expect_err("reachable negative conditional branch must be rejected");
+    assert!(error
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E002"));
 }
 
 fn condition_model(condition: Value, pickup_probability: &str, triggers: Vec<Value>) -> ModelIr {
@@ -140,7 +149,10 @@ fn w003_detects_inclusion_range_and_zero_probability_contradictions() {
         let model = compile(&condition_model(condition, pickup_probability, Vec::new()))
             .expect("impossible condition is a warning, not an error");
         assert!(
-            model.diagnostics.iter().any(|diagnostic| diagnostic.code == "W003"),
+            model
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "W003"),
             "condition case {index} must be diagnosed",
         );
     }
@@ -163,5 +175,8 @@ fn w003_does_not_warn_when_a_grant_can_satisfy_a_zero_probability_condition() {
     ))
     .expect("grant-reachable condition must compile");
 
-    assert!(!model.diagnostics.iter().any(|diagnostic| diagnostic.code == "W003"));
+    assert!(!model
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "W003"));
 }

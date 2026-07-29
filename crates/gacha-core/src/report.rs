@@ -11,7 +11,12 @@ pub struct WilsonInterval {
 
 pub fn wilson(successes: u64, trials: u64, z: f64) -> WilsonInterval {
     if trials == 0 {
-        return WilsonInterval { estimate: 0.0, lower: 0.0, upper: 1.0, confidence: 0.95 };
+        return WilsonInterval {
+            estimate: 0.0,
+            lower: 0.0,
+            upper: 1.0,
+            confidence: 0.95,
+        };
     }
     let n = trials as f64;
     let p = successes as f64 / n;
@@ -21,8 +26,16 @@ pub fn wilson(successes: u64, trials: u64, z: f64) -> WilsonInterval {
     let radius = z * ((p * (1.0 - p) / n + z2 / (4.0 * n * n)).sqrt()) / denominator;
     WilsonInterval {
         estimate: p,
-        lower: if successes == 0 { 0.0 } else { (center - radius).max(0.0) },
-        upper: if successes == trials { 1.0 } else { (center + radius).min(1.0) },
+        lower: if successes == 0 {
+            0.0
+        } else {
+            (center - radius).max(0.0)
+        },
+        upper: if successes == trials {
+            1.0
+        } else {
+            (center + radius).min(1.0)
+        },
         confidence: 0.95,
     }
 }

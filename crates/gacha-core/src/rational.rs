@@ -121,9 +121,21 @@ mod tests {
 
     #[test]
     fn parses_decimal_without_f64() {
-        assert_eq!(parse_literal("0.007").unwrap(), Rational::new(7.into(), 1000.into()));
-        assert_eq!(parse_literal("1/3").unwrap(), Rational::new(1.into(), 3.into()));
-        assert_eq!(parse_literal("3e-5").unwrap(), Rational::new(3.into(), 100000.into()));
-        assert_eq!(parse_literal("-1.25e2").unwrap(), Rational::from_integer((-125).into()));
+        assert_eq!(
+            parse_literal("0.007").unwrap(),
+            Rational::new(7.into(), 1000.into())
+        );
+        assert_eq!(
+            parse_literal("1/3").unwrap(),
+            Rational::new(1.into(), 3.into())
+        );
+        assert_eq!(
+            parse_literal("3e-5").unwrap(),
+            Rational::new(3.into(), 100000.into())
+        );
+        assert_eq!(
+            parse_literal("-1.25e2").unwrap(),
+            Rational::from_integer((-125).into())
+        );
     }
 }

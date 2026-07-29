@@ -1,7 +1,5 @@
 use gacha_core::engine_dp::{DpOptions, DpRunResult};
-use gacha_core::{
-    compile, run_dp, run_exact, ExactOptions, ModelIr,
-};
+use gacha_core::{compile, run_dp, run_exact, ExactOptions, ModelIr};
 use serde_json::json;
 
 fn first_hit_model(numeric: &str, probability: &str, max_trials: u32) -> ModelIr {
@@ -29,11 +27,14 @@ fn first_hit_model(numeric: &str, probability: &str, max_trials: u32) -> ModelIr
 
 #[test]
 fn exact_first_hit_matches_closed_form_and_scaled_dp() {
-    let exact_model = compile(&first_hit_model("exact", "1/2", 3))
-        .expect("exact first-hit model must compile");
+    let exact_model =
+        compile(&first_hit_model("exact", "1/2", 3)).expect("exact first-hit model must compile");
     let exact = run_exact(
         &exact_model,
-        ExactOptions { reduce_layers: true, ..Default::default() },
+        ExactOptions {
+            reduce_layers: true,
+            ..Default::default()
+        },
         |_, _| true,
     )
     .expect("exact first-hit run");
@@ -41,7 +42,11 @@ fn exact_first_hit_matches_closed_form_and_scaled_dp() {
     let expected = ["0", "4", "2", "1"];
     assert_eq!(exact.denominator, "8");
     assert_eq!(
-        first_hit.pmf.iter().map(|value| value.numerator.as_str()).collect::<Vec<_>>(),
+        first_hit
+            .pmf
+            .iter()
+            .map(|value| value.numerator.as_str())
+            .collect::<Vec<_>>(),
         expected,
     );
     assert!(first_hit.pmf.iter().all(|value| value.denominator == "8"));
@@ -51,14 +56,11 @@ fn exact_first_hit_matches_closed_form_and_scaled_dp() {
     assert_eq!(exact.joint[0].counts, vec![0]);
     assert_eq!(exact.joint[0].numerator, "1");
 
-    let scaled_model = compile(&first_hit_model("scaled", "1/2", 3))
-        .expect("scaled first-hit model must compile");
-    let DpRunResult::Approximate(scaled) = run_dp(
-        &scaled_model,
-        DpOptions { prune_log10: None },
-        |_, _| true,
-    )
-    .expect("scaled first-hit run")
+    let scaled_model =
+        compile(&first_hit_model("scaled", "1/2", 3)).expect("scaled first-hit model must compile");
+    let DpRunResult::Approximate(scaled) =
+        run_dp(&scaled_model, DpOptions { prune_log10: None }, |_, _| true)
+            .expect("scaled first-hit run")
     else {
         panic!("scaled model must use approximate DP");
     };
@@ -86,12 +88,15 @@ fn exact_first_hit_uses_consumed_grant_trial() {
     }]))
     .expect("grant must deserialize");
     let model = compile(&ir).expect("grant first-hit model must compile");
-    let exact = run_exact(&model, ExactOptions::default(), |_, _| true)
-        .expect("grant first-hit exact run");
+    let exact =
+        run_exact(&model, ExactOptions::default(), |_, _| true).expect("grant first-hit exact run");
     let first_hit = exact.first_hit.expect("grant first-hit result");
 
     assert_eq!(first_hit.pmf[1].numerator, "0");
     assert_eq!(first_hit.pmf[2].numerator, first_hit.pmf[2].denominator);
     assert_eq!(first_hit.failure_reachable.numerator, "0");
-    assert!(exact.joint.is_empty(), "all mass must be absorbed by the grant");
+    assert!(
+        exact.joint.is_empty(),
+        "all mass must be absorbed by the grant"
+    );
 }

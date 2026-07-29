@@ -35,7 +35,8 @@
 | **엔티티(entity)** | 사용자가 정의하는 당첨 대상. 트리 구조로 중첩 가능 |
 | **리프(leaf)** | 컴파일 결과로 생성되는 **서로소인** 최종 결과. 매 시행은 정확히 1개의 리프를 산출 |
 | **제어 카운터(control var)** | 전이 확률 계산에 사용되는 상태 변수. 상한 선언 필수 (예: 천장 카운터 0~89) |
-| **집계 카운터(stat var)** | 결과 보고용 상태 변수. 상한은 N (예: 누적 픽업 수) |
+| **자동 리프 카운터(stat)** | 엔진이 리프마다 자동 관리하는 카운터. 사용자가 선언하지 않는다 |
+| **집계 변수(accumulator)** | 확률에는 영향을 주지 않고 경로 의존 통계를 누적하는 사용자 선언 변수. 상한 필수 |
 | **레이어(layer)** | DP에서 특정 시행 횟수 n에 대응하는 상태-확률 분포 전체 |
 
 ---
@@ -221,7 +222,7 @@ pub struct ExactLayer {
 
 ```jsonc
 {
-  "irVersion": 1,
+  "irVersion": 2,
   "name": "블루아카이브 픽업 모집",
 
   // ── 엔티티 트리 (사용자 입력 형태) ─────────────────────
@@ -239,11 +240,22 @@ pub struct ExactLayer {
   // 자식 확률 합이 부모를 넘을 때의 정책
   "nestingPolicy": "clampChildren",     // clampChildren | expandParent | scaleSiblings | error
 
-  // ── 제어 변수 (사용자 선언) ───────────────────────────
-  // stat 카운터는 선언하지 않는다. 리프마다 자동 생성된다 (§3.5)
+  // ── 상태 변수 (사용자 선언) ───────────────────────────
+  // stat 리프 카운터는 선언하지 않는다. 리프마다 자동 생성된다 (§3.5)
   "stateVars": [
     { "id": "pity",      "init": 0, "max": 89, "role": "control" },
-    { "id": "guarantee", "init": 0, "max": 1,  "role": "control" }
+    { "id": "guarantee", "init": 0, "max": 1,  "role": "control" },
+    {
+      "id": "spent", "name": "소모 재화", "init": 0, "max": 120000,
+      "role": "accumulator",
+      "update": [
+        { "when": { "leafOf": "star3" },
+          "set": { "add": [{ "var": "spent" }, { "lit": "120" }] } },
+        { "when": { "not": { "leafOf": "star3" } },
+          "set": { "add": [{ "var": "spent" }, { "lit": "120" }] } }
+      ],
+      "clampPolicy": "saturate"
+    }
   ],
 
   // ── 확률 규칙: 엔티티 확률을 상태의 함수로 오버라이드 ────
@@ -287,12 +299,18 @@ pub struct ExactLayer {
   // ── 실행 설정 ────────────────────────────────────────
   "run": {
     "maxTrials": 1000,
-    // DP에서 결합 추적할 리프. 엔티티명을 쓰면 그 하위 리프 전체로 확장된다
-    "trackJoint": ["pickup", "star3__self"],
-    "numeric": "scaled"                     // f64 | scaled | exact
+    // 리프/엔티티/집계 변수. 엔티티명은 하위 리프 전체로 확장된다
+    "trackJoint": ["pickup", "spent"],
+    "numeric": "scaled",                    // f64 | scaled | exact
+    "trialSeries": "marginal",              // none | marginal | checkpoints
+    "seriesCheckpoints": [10, 50, 100, 1000]
   }
 }
 ```
+
+`irVersion: 1`은 하위 호환으로 계속 읽되 accumulator와 시행 시리즈가 없는 모델로
+해석한다. 새 프리셋과 UI 출력은 v2를 사용한다. `checkpoints`는 최대 20개이며 각 값은
+`1..=maxTrials` 범위여야 한다.
 
 ### 3.2 리터럴 파싱 규칙 (중요)
 
@@ -338,7 +356,7 @@ f64로 먼저 파싱한 뒤 유리수로 변환하면 `0.007`이 `7.000000000000
 | E001 | 엔티티 id 중복 | error |
 | E002 | 확률 표현식이 음수를 산출 가능 (정적 분석 가능한 경우) | error |
 | E003 | 확률표 계산 런타임 실패 — 음수 확률(E002가 정적으로 못 잡은 경우의 백스톱), 최상위 리프 확률 합 > 1, 리프 확률 질량 불일치 중 하나 (`compile.rs`의 `calculate_leaf_probs`/`split_entity`) | error |
-| E004 | `role: control`인 변수에 `max` 미선언 | error |
+| E004 | `role: control`/`accumulator` 변수의 `max` 누락, 초기값 범위 오류, 또는 `clampPolicy: error`에서 범위 초과 가능 | error |
 | E005 | `probRule`이 정의되지 않은 엔티티를 대상으로 함 | error |
 | E006 | 표현식에 금지 연산 사용 | error |
 | W001 | 자식 확률 합 > 부모 확률 (정적 감지 가능한 경우) | warning + 정책 적용 |
@@ -348,6 +366,8 @@ f64로 먼저 파싱한 뒤 유리수로 변환하면 `0.007`이 `7.000000000000
 | W007 | `consumesTrial` 지급이 남은 논리 시행 예산을 초과해 적용되지 않음 | warning |
 | E007 | `grant.leaf`가 내부 노드를 가리킴 (어느 리프인지 모호) | error |
 | E008 | `transitions`/`triggers`가 리프 카운트를 직접 조작 | error |
+| E009 | 자동 리프 카운터용 `role: stat`을 사용자가 선언 | error |
+| W008 | accumulator가 자동 리프 카운터와 동일하여 파생 표시식으로 강등 | warning |
 
 ### 3.5 카운트 모델 (필독)
 
@@ -368,7 +388,23 @@ f64로 먼저 파싱한 뒤 유리수로 변환하면 `0.007`이 `7.000000000000
 
 **조건식과 결과 뷰에서는 엔티티 이름을 그대로 쓸 수 있다.** 컴파일러가 `nStar3` → `count(pickup) + count(star3__self)`로 전개한다. 사용자는 리프 개념을 몰라도 된다.
 
-### 3.6 지급(grant) 의미론
+### 3.6 집계 변수(accumulator) 의미론
+
+집계 변수는 확률식에서 참조할 수 없고 결과 통계에만 사용한다. 경로 의존 값은
+`StateCodec`의 `control`/리프 카운트와 분리된 세 번째 구획에 저장한다. 갱신식은
+엔진 루프에서 평가하지 않고 컴파일 시
+`(집계 변수, 제어 상태, 시행, 리프, 현재값) → 다음값` 테이블로 만든다. 제어 상태나
+시행에 의존하지 않는 축은 해당 테이블 차원을 1로 접는다.
+
+자동 리프 카운터와 동일한 `x = x + 1 when leafOf(...)` 집계 변수는 `W008`을 내고
+상태 축을 만들지 않은 채 리프 합으로 파생한다. `max` 초과 시 기본 `saturate`는
+보정 횟수를 `accumulatorClampEvents`로 별도 보고하며, `error`는 컴파일을 거부한다.
+
+갱신 순서는 **일반 뽑기 확정 → transitions → accumulator 갱신 → grant**로 고정한다.
+`appliesTransitions: true` 지급은 transition 뒤 accumulator 갱신도 일반 결과와 같이
+적용한다.
+
+### 3.7 지급(grant) 의미론
 
 확정 지급은 게임마다 세부가 다르므로 명시적 필드로 제어한다.
 
@@ -379,7 +415,7 @@ f64로 먼저 파싱한 뒤 유리수로 변환하면 `0.007`이 `7.000000000000
 | `consumesTrial` | true면 지급이 시행 1회를 소모(전체 시행 횟수에 산입) | false |
 | `appliesTransitions` | true면 해당 리프가 정상 당첨된 것처럼 `transitions`를 적용 (예: 천장 카운터 리셋) | true |
 
-지급은 **해당 시행의 일반 뽑기 처리가 끝난 직후**에 적용된다. 순서가 뒤바뀌면 천장 카운터 값이 달라지므로 이 순서를 고정한다.
+지급은 **해당 시행의 일반 뽑기·transition·accumulator 갱신이 끝난 직후**에 적용된다. 순서가 뒤바뀌면 천장 카운터 값이 달라지므로 이 순서를 고정한다.
 
 `consumesTrial: true`인 지급은 일반 뽑기 직후 다음 논리 시행 슬롯 1개를 차지한다. `maxTrials`는 일반 뽑기와 이 슬롯을 합친 총 시행 예산이다. 따라서 지급 슬롯만큼 다음 일반 뽑기 번호를 건너뛰며, 남은 슬롯이 없으면 해당 지급은 적용하지 않는다. 지급의 전이와 조건 판정에는 지급이 차지한 논리 시행 번호를 사용한다. `amount`와 관계없이 지급 동작 하나가 슬롯 하나를 소모한다.
 
@@ -502,7 +538,9 @@ pub struct MarkovAnalysis {
 - 상태 공간 추정치가 한계 초과
 - (향후) 마르코프 성질을 깨는 기능 사용
 
-**집계 카운터 축소**: `run.trackJoint`에 나열되지 않은 stat 변수는 DP 상태에서 제외한다. 차원 하나를 빼면 상태 수가 N배 줄어들므로, **UI 기본값은 "필요한 것만 추적"** 이어야 한다.
+**집계 축소**: 엔티티 카운터와 자동 리프 카운터로 복원 가능한 accumulator는 상태
+축으로 만들지 않는다. 경로 의존 accumulator는 추적 여부와 관계없이 다음 갱신에
+필요하므로 상태에 남는다. UI는 `(max+1)`배 상태 증가를 계산 규모에 즉시 반영한다.
 
 ---
 
@@ -540,6 +578,8 @@ pub struct McResult {
     pub joint: HashMap<StatKey, u64>,      // 결합 히스토그램
     pub elapsed_ms: u64,
     pub clamp_events: u64,                 // §4.4 충돌 해소 발생 횟수
+    pub accumulator_clamp_events: u64,
+    pub trial_series: TrialSeries,
 }
 ```
 
@@ -560,12 +600,14 @@ MC 결과의 모든 확률 셀에 **Wilson score 구간**(95% 기본)을 함께 
 ### 6.1 상태 인코딩
 
 ```
-state = (control vars..., tracked leaf counts..., absorbed_flag)
+state = (control vars..., accumulator vars..., tracked leaf counts..., absorbed_flag)
 ```
 
 집계 차원은 **리프 카운트**다 (§3.5). 엔티티 단위 차원을 두지 않는다.
 `trackJoint`에 엔티티명이 오면 컴파일러가 하위 리프 집합으로 전개하고,
 전개된 리프 중 하나는 종속이므로 `L-1`개만 상태에 포함한다.
+accumulator는 확률표 제어 인덱스와 분리되어 `control_invariant` 정규화 시에도 값이
+보존된다.
 
 혼합 진법 정수로 패킹한다:
 
@@ -628,6 +670,20 @@ for trial in 1..=N {
 |---|---|---|
 | N=1,000, 리프 3개, 제어 180상태, 픽업만 추적 | ScaledF64 | < 300ms |
 | N=1,000, 동일, 결합 추적 (nStar3 × nPickup) | ScaledF64 | < 8s |
+
+### 6.7 시행별 결과 시리즈
+
+`run.trialSeries`의 기본은 `marginal`이다.
+
+| 모드 | 반환 내용 |
+|---|---|
+| `none` | 마지막 결합 분포만 반환 |
+| `marginal` | 도달한 각 `(trial, 값)`에서 추적 축별 주변분포 반환 |
+| `checkpoints` | 최대 20개의 지정 시행에서 완전 결합분포 반환 |
+
+`consumesTrial` 때문에 시행 번호가 건너뛸 수 있으므로 배열 인덱스가 아니라 명시적인
+`trial` 값을 사용한다. exact는 레이어 저장 시 공통분모에서 f64로 한 번만 변환하고,
+MC 주변분포의 모든 셀은 반복 수와 Wilson 95% 구간을 포함한다.
 | N=200, 동일, 픽업만 추적 | ExactInt | < 30s |
 
 **2026-07-28 release 실측(4스레드, 5회 중앙값)**: 위 첫 두 시나리오는 각각
@@ -792,14 +848,16 @@ ExactInt 백엔드는 동일한 필드를 `ExactFirstHitResult`로 반환한다.
 
 | 카테고리 | 블록 |
 |---|---|
-| 엔티티 | 엔티티 정의(이름, 확률, 중첩 슬롯) |
+| 뽑기 결과 | 결과 정의(이름, 확률, 중첩 슬롯) |
 | 상태 | 제어 변수 선언(초기값, **상한 필수**), 집계 변수 선언 |
 | 확률 규칙 | 산술, 비교, if/else, 상태 참조, min/max/clamp |
 | 전이 | `~가 나오면 → 상태 변경` |
 | 트리거 | `시행 N회에 → 상태 변경` |
 | 조건 | AND/OR/XOR/NOT, 카운터 비교 |
 
-Blockly 워크스페이스 → **Model IR JSON 직렬화**. JS 코드 생성 경로는 만들지 않는다.
+최상위 모델 컨테이너의 의미별 슬롯에 블록을 배치한다. 슬롯 내부 연결은 선언을
+그룹화할 뿐 실행 순서를 뜻하지 않는다. Blockly 워크스페이스 → **Model IR JSON
+직렬화**. JS 코드 생성 경로는 만들지 않는다.
 
 ### 10.2 실시간 검증 패널 (에디터 우측 고정)
 
@@ -829,6 +887,8 @@ Blockly 워크스페이스 → **Model IR JSON 직렬화**. JS 코드 생성 경
 - **시행 횟수 분포**: PMF/CDF 차트 + 백분위수 + 실패 확률(2종 구분)
 - **극소값 표시**: `1.2345678901e-436` 형태의 과학적 표기 지원 (ScaledF64의 존재 이유)
 - **엔진 비교 뷰**: 같은 모델의 MC/DP 결과를 나란히. 개발자 검증에도 그대로 쓰인다
+- **피벗 축**: 임의 차원을 행/열/집계/필터로 배치. 1차원은 SVG 막대, 2차원은 텍스트를 병기한 히트맵
+- **재현·내보내기**: 엔진/수치 모드/시드/반복 수/모델 해시/소요 시간, 피벗 CSV와 원본 JSON
 
 ### 10.4 프리셋
 
@@ -844,7 +904,7 @@ Blockly 워크스페이스 → **Model IR JSON 직렬화**. JS 코드 생성 경
     "confidence": "official",     // official | datamined | community-estimate
     "notes": "선택 모집 포인트 교환은 확률이 아닌 결정론적 상한이므로 별도 모델"
   },
-  "irVersion": 1,
+  "irVersion": 2,
   // ... 이하 일반 IR
 }
 ```
@@ -916,6 +976,8 @@ Blockly 워크스페이스 → **Model IR JSON 직렬화**. JS 코드 생성 경
 | §5.2 웹 병렬 | Web Worker | native MC·DP·ExactInt는 Rayon 병렬화 완료. WASM은 아직 단일 스레드 | UI 후속 |
 | §4.2 lazy 확률표 | 제어상태 10^7 초과 시 lazy 캐시 | `compile.rs:280-305`가 항상 즉시 사전계산. 10,000,000 초과 시 `W004` 경고(`compile.rs:282`)만 내고 그대로 계산 강행 | 한계 초과 모델이 나오면 착수 |
 | §8.1 체크포인트 복원 성능 | 가장 가까운 체크포인트부터 최대 K/2 스텝 재계산 | `restore_dp_snapshot`은 올바른 목표 레이어를 만들지만 현재 모델 시작점부터 재계산 | 체크포인트 재개 시 최초 달성 누적 질량도 함께 직렬화한 뒤 후속 |
+| §3.6 일반 파생 accumulator | 리프 카운트·시행만 참조하는 모든 갱신식을 상태 없는 표시식으로 분류 | 현재는 자동 리프 카운터와 정확히 같은 `x=x+1 when leafOf(...)` 패턴만 W008로 강등. 임의 파생식은 아직 지원하지 않음 | 파생식 IR을 별도 필드로 명시한 뒤 확장 |
+| §5.2 웹 진행률/취소 | Web Worker에서 계산하고 진행률·취소 제공 | WASM 호출은 여전히 메인 스레드 동기 실행. 결과 탭은 실행 중 중복 클릭만 방지 | WASM 진행 콜백 ABI와 Worker 번들 경로를 함께 설계 |
 
 ### 13.2 미구현 진단
 

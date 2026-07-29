@@ -1,14 +1,14 @@
-use crate::compile::CompiledModel;
+use crate::compile::{CompiledModel, TrackedDimension};
 use crate::report::{wilson, WilsonInterval};
 use num_traits::ToPrimitive;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use serde::Serialize;
 use std::collections::BTreeMap;
-#[cfg(target_arch = "wasm32")]
-use web_time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 const STREAM_RUNS: u64 = 4_096;
 
@@ -22,7 +22,12 @@ pub struct McOptions {
 
 impl Default for McOptions {
     fn default() -> Self {
-        Self { runs: 100_000, seed: 42, confidence_z: 1.959963984540054, batch_size: 10_000 }
+        Self {
+            runs: 100_000,
+            seed: 42,
+            confidence_z: 1.959963984540054,
+            batch_size: 10_000,
+        }
     }
 }
 
@@ -39,11 +44,53 @@ pub struct McCell {
 pub struct McResult {
     pub runs: u64,
     pub seed: u64,
+    pub model_hash: String,
     pub tracked_leaf_ids: Vec<String>,
     pub joint: Vec<McCell>,
     pub first_hit: Option<Vec<u64>>,
     pub elapsed_ms: u64,
     pub clamp_events: u64,
+    pub accumulator_clamp_events: u64,
+    pub trial_series: McTrialSeriesResult,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct McTrialSeriesResult {
+    pub mode: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub marginal: Vec<McMarginalSeriesPoint>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub checkpoints: Vec<McCheckpointSeriesPoint>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McMarginalSeriesPoint {
+    pub trial: u32,
+    pub axes: Vec<McMarginalAxis>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McMarginalAxis {
+    pub id: String,
+    pub cells: Vec<McMarginalCell>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McMarginalCell {
+    pub value: u32,
+    pub occurrences: u64,
+    pub interval: WilsonInterval,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McCheckpointSeriesPoint {
+    pub trial: u32,
+    pub joint: Vec<McCell>,
 }
 
 #[derive(Clone)]
@@ -61,7 +108,11 @@ impl AliasTable {
         let mut small = Vec::new();
         let mut large = Vec::new();
         for (i, &p) in scaled.iter().enumerate() {
-            if p < 1.0 { small.push(i); } else { large.push(i); }
+            if p < 1.0 {
+                small.push(i);
+            } else {
+                large.push(i);
+            }
         }
         while !small.is_empty() && !large.is_empty() {
             let s = small.pop().expect("small alias bucket");
@@ -69,7 +120,11 @@ impl AliasTable {
             probability[s] = scaled[s];
             alias[s] = l;
             scaled[l] = scaled[l] + scaled[s] - 1.0;
-            if scaled[l] < 1.0 { small.push(l); } else { large.push(l); }
+            if scaled[l] < 1.0 {
+                small.push(l);
+            } else {
+                large.push(l);
+            }
         }
         for i in large.into_iter().chain(small) {
             probability[i] = 1.0;
@@ -80,7 +135,11 @@ impl AliasTable {
 
     fn sample(&self, rng: &mut Xoshiro256PlusPlus) -> usize {
         let column = rng.gen_range(0..self.probability.len());
-        if rng.gen::<f64>() < self.probability[column] { column } else { self.alias[column] }
+        if rng.gen::<f64>() < self.probability[column] {
+            column
+        } else {
+            self.alias[column]
+        }
     }
 }
 
@@ -90,12 +149,32 @@ pub fn run_mc(
     mut progress: impl FnMut(u64, u64) -> bool,
 ) -> McResult {
     let started = Instant::now();
-    let tables: Vec<Vec<_>> = model.prob_table.entries.iter().map(|by_trial| {
-        by_trial.iter().map(|p| AliasTable::new(&p.exact.iter()
-            .map(|v| v.to_f64().unwrap_or(0.0)).collect::<Vec<_>>())).collect()
-    }).collect();
+    let tables: Vec<Vec<_>> = model
+        .prob_table
+        .entries
+        .iter()
+        .map(|by_trial| {
+            by_trial
+                .iter()
+                .map(|p| {
+                    AliasTable::new(
+                        &p.exact
+                            .iter()
+                            .map(|v| v.to_f64().unwrap_or(0.0))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect()
+        })
+        .collect();
     let mut histogram: BTreeMap<Vec<u32>, u64> = BTreeMap::new();
-    let mut first_hit = model.condition.as_ref().map(|_| vec![0u64; model.max_trials as usize + 1]);
+    let mut first_hit = model
+        .condition
+        .as_ref()
+        .map(|_| vec![0u64; model.max_trials as usize + 1]);
+    let mut marginal_series: BTreeMap<u32, Vec<BTreeMap<u32, u64>>> = BTreeMap::new();
+    let mut checkpoint_series: BTreeMap<u32, BTreeMap<Vec<u32>, u64>> = BTreeMap::new();
+    let mut accumulator_clamp_events = 0u64;
     let chunks_per_batch = options.batch_size.max(1).div_ceil(STREAM_RUNS);
     let stream_count = options.runs.div_ceil(STREAM_RUNS);
     let stream_rngs = build_stream_rngs(options.seed, stream_count);
@@ -113,24 +192,96 @@ pub fn run_mc(
                     *value += addition;
                 }
             }
+            accumulator_clamp_events += chunk.accumulator_clamps;
+            for (trial, axes) in chunk.marginal_series {
+                let totals = marginal_series.entry(trial).or_insert_with(|| {
+                    model
+                        .tracked_dimensions
+                        .iter()
+                        .map(|_| BTreeMap::new())
+                        .collect()
+                });
+                for (total, local) in totals.iter_mut().zip(axes) {
+                    for (value, occurrences) in local {
+                        *total.entry(value).or_default() += occurrences;
+                    }
+                }
+            }
+            for (trial, local) in chunk.checkpoint_series {
+                let total = checkpoint_series.entry(trial).or_default();
+                for (counts, occurrences) in local {
+                    *total.entry(counts).or_default() += occurrences;
+                }
+            }
         }
         stream = end_stream;
-        if !progress(completed, options.runs) { break; }
+        if !progress(completed, options.runs) {
+            break;
+        }
     }
-    let actual_runs: u64 = histogram.values().sum();
-    let joint = histogram.into_iter().map(|(counts, occurrences)| McCell {
-        counts,
-        occurrences,
-        interval: wilson(occurrences, actual_runs, options.confidence_z),
-    }).collect();
+    let actual_runs = completed;
+    let joint = histogram
+        .into_iter()
+        .map(|(counts, occurrences)| McCell {
+            counts,
+            occurrences,
+            interval: wilson(occurrences, actual_runs, options.confidence_z),
+        })
+        .collect();
+    let trial_series = McTrialSeriesResult {
+        mode: match model.trial_series {
+            crate::ir::TrialSeriesMode::None => "none",
+            crate::ir::TrialSeriesMode::Marginal => "marginal",
+            crate::ir::TrialSeriesMode::Checkpoints => "checkpoints",
+        }
+        .into(),
+        marginal: marginal_series
+            .into_iter()
+            .map(|(trial, axes)| McMarginalSeriesPoint {
+                trial,
+                axes: axes
+                    .into_iter()
+                    .enumerate()
+                    .map(|(axis, cells)| McMarginalAxis {
+                        id: model.tracked_ids[axis].clone(),
+                        cells: cells
+                            .into_iter()
+                            .map(|(value, occurrences)| McMarginalCell {
+                                value,
+                                occurrences,
+                                interval: wilson(occurrences, actual_runs, options.confidence_z),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        checkpoints: checkpoint_series
+            .into_iter()
+            .map(|(trial, cells)| McCheckpointSeriesPoint {
+                trial,
+                joint: cells
+                    .into_iter()
+                    .map(|(counts, occurrences)| McCell {
+                        counts,
+                        occurrences,
+                        interval: wilson(occurrences, actual_runs, options.confidence_z),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
     McResult {
         runs: actual_runs,
         seed: options.seed,
-        tracked_leaf_ids: model.tracked_leaves.iter().map(|i| model.leaves[*i].id.clone()).collect(),
+        model_hash: model.model_hash_hex(),
+        tracked_leaf_ids: model.tracked_ids.clone(),
         joint,
         first_hit,
         elapsed_ms: started.elapsed().as_millis() as u64,
         clamp_events: model.prob_table.clamp_events,
+        accumulator_clamp_events,
+        trial_series,
     }
 }
 
@@ -138,6 +289,9 @@ struct ChunkResult {
     runs: u64,
     histogram: BTreeMap<Vec<u32>, u64>,
     first_hit: Option<Vec<u64>>,
+    accumulator_clamps: u64,
+    marginal_series: BTreeMap<u32, Vec<BTreeMap<u32, u64>>>,
+    checkpoint_series: BTreeMap<u32, BTreeMap<Vec<u32>, u64>>,
 }
 
 #[cfg(feature = "parallel")]
@@ -150,8 +304,17 @@ fn run_streams(
     end: u64,
 ) -> Vec<ChunkResult> {
     use rayon::prelude::*;
-    (start..end).into_par_iter()
-        .map(|stream| run_stream(model, tables, stream_rngs[stream as usize].clone(), options, stream))
+    (start..end)
+        .into_par_iter()
+        .map(|stream| {
+            run_stream(
+                model,
+                tables,
+                stream_rngs[stream as usize].clone(),
+                options,
+                stream,
+            )
+        })
         .collect()
 }
 
@@ -165,7 +328,15 @@ fn run_streams(
     end: u64,
 ) -> Vec<ChunkResult> {
     (start..end)
-        .map(|stream| run_stream(model, tables, stream_rngs[stream as usize].clone(), options, stream))
+        .map(|stream| {
+            run_stream(
+                model,
+                tables,
+                stream_rngs[stream as usize].clone(),
+                options,
+                stream,
+            )
+        })
         .collect()
 }
 
@@ -189,55 +360,146 @@ fn run_stream(
     let start = stream * STREAM_RUNS;
     let runs = (options.runs - start).min(STREAM_RUNS);
     let mut histogram = BTreeMap::new();
-    let mut first_hit = model.condition.as_ref()
+    let mut first_hit = model
+        .condition
+        .as_ref()
         .map(|_| vec![0u64; model.max_trials as usize + 1]);
+    let mut accumulator_clamps = 0u64;
+    let mut marginal_series: BTreeMap<u32, Vec<BTreeMap<u32, u64>>> = BTreeMap::new();
+    let mut checkpoint_series: BTreeMap<u32, BTreeMap<Vec<u32>, u64>> = BTreeMap::new();
     for _ in 0..runs {
         let mut control = model.control_init.clone();
+        let mut accumulators = model.accumulator_init.clone();
         let mut counts = vec![0u32; model.leaves.len()];
         let mut hit = false;
         let mut trial = 0u32;
         while trial < model.max_trials {
             let draw_trial = trial + 1;
             let ci = model.control_index(&control);
-            let ti = if model.prob_table.trial_dependent { draw_trial as usize - 1 } else { 0 };
+            let ti = if model.prob_table.trial_dependent {
+                draw_trial as usize - 1
+            } else {
+                0
+            };
             let leaf = tables[ci][ti].sample(&mut rng);
             counts[leaf] += 1;
             model.apply_transitions(&mut control, leaf, draw_trial);
+            accumulator_clamps +=
+                model.apply_accumulators(&control, &mut accumulators, leaf, draw_trial);
             if !hit && condition_matches(model, &counts, draw_trial) {
-                if let Some(pmf) = &mut first_hit { pmf[draw_trial as usize] += 1; }
+                if let Some(pmf) = &mut first_hit {
+                    pmf[draw_trial as usize] += 1;
+                }
                 hit = true;
             }
-            let consumed = model.apply_triggers(
+            if hit {
+                break;
+            }
+            let (consumed, grant_clamps) = model.apply_triggers(
                 &mut control,
+                &mut accumulators,
                 &mut counts,
                 draw_trial,
                 |grant_counts, grant_trial| {
                     if !hit && condition_matches(model, grant_counts, grant_trial) {
-                        if let Some(pmf) = &mut first_hit { pmf[grant_trial as usize] += 1; }
+                        if let Some(pmf) = &mut first_hit {
+                            pmf[grant_trial as usize] += 1;
+                        }
                         hit = true;
                     }
                 },
             );
+            accumulator_clamps += grant_clamps;
             trial = draw_trial + consumed;
+            if hit {
+                break;
+            }
+            match model.trial_series {
+                crate::ir::TrialSeriesMode::Marginal => {
+                    let axes = marginal_series.entry(trial).or_insert_with(|| {
+                        model
+                            .tracked_dimensions
+                            .iter()
+                            .map(|_| BTreeMap::new())
+                            .collect::<Vec<_>>()
+                    });
+                    for (axis, value) in tracked_values(model, &counts, &accumulators)
+                        .into_iter()
+                        .enumerate()
+                    {
+                        *axes[axis].entry(value).or_default() += 1;
+                    }
+                }
+                crate::ir::TrialSeriesMode::Checkpoints
+                    if model.series_checkpoints.contains(&trial) =>
+                {
+                    let values = tracked_values(model, &counts, &accumulators);
+                    *checkpoint_series
+                        .entry(trial)
+                        .or_default()
+                        .entry(values)
+                        .or_default() += 1;
+                }
+                _ => {}
+            }
         }
-        let key = model.tracked_leaves.iter().map(|i| counts[*i]).collect();
-        *histogram.entry(key).or_default() += 1;
+        if !hit {
+            let key = tracked_values(model, &counts, &accumulators);
+            *histogram.entry(key).or_default() += 1;
+        }
     }
-    ChunkResult { runs, histogram, first_hit }
+    ChunkResult {
+        runs,
+        histogram,
+        first_hit,
+        accumulator_clamps,
+        marginal_series,
+        checkpoint_series,
+    }
+}
+
+fn tracked_values(model: &CompiledModel, counts: &[u32], accumulators: &[u32]) -> Vec<u32> {
+    model
+        .tracked_dimensions
+        .iter()
+        .map(|dimension| match dimension {
+            TrackedDimension::Leaf(index) => counts[*index],
+            TrackedDimension::Accumulator(index) => accumulators[*index],
+            TrackedDimension::DerivedAccumulator(index) => model.derived_accumulator_leaves[*index]
+                .iter()
+                .map(|leaf| counts[*leaf])
+                .sum(),
+        })
+        .collect()
 }
 
 fn condition_matches(model: &CompiledModel, counts: &[u32], trial: u32) -> bool {
-    let Some(program) = &model.condition else { return false; };
-    crate::expr::eval(program, |name| {
-        let entity = name.strip_prefix('n').map(lower_first).unwrap_or_else(|| name.to_owned());
-        model.entity_count(counts, &entity)
-            .map(|v| crate::rational::Rational::from_integer(v.into()))
-    }, trial).and_then(|v| v.boolean()).unwrap_or(false)
+    let Some(program) = &model.condition else {
+        return false;
+    };
+    crate::expr::eval(
+        program,
+        |name| {
+            let entity = name
+                .strip_prefix('n')
+                .map(lower_first)
+                .unwrap_or_else(|| name.to_owned());
+            model
+                .entity_count(counts, &entity)
+                .map(|v| crate::rational::Rational::from_integer(v.into()))
+        },
+        trial,
+    )
+    .and_then(|v| v.boolean())
+    .unwrap_or(false)
 }
 
 fn lower_first(value: &str) -> String {
     let mut chars = value.chars();
-    chars.next().map(|c| c.to_lowercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+    chars
+        .next()
+        .map(|c| c.to_lowercase().collect::<String>() + chars.as_str())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -284,18 +546,31 @@ mod tests {
                 "numeric": "scaled",
                 "condition": {"ge": [{"var": "nHit"}, {"lit": "2"}]}
             }
-        })).unwrap();
+        }))
+        .unwrap();
         let model = compile(&ir).unwrap();
-        let options = McOptions { runs: 32_777, seed: 0x5eed, batch_size: 10_000, ..Default::default() };
+        let options = McOptions {
+            runs: 32_777,
+            seed: 0x5eed,
+            batch_size: 10_000,
+            ..Default::default()
+        };
         let run = |threads| {
-            rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap()
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
                 .install(|| run_mc(&model, options.clone(), |_, _| true))
         };
         let one = run(1);
         let four = run(4);
-        let cells = |result: &McResult| result.joint.iter()
-            .map(|cell| (cell.counts.clone(), cell.occurrences))
-            .collect::<Vec<_>>();
+        let cells = |result: &McResult| {
+            result
+                .joint
+                .iter()
+                .map(|cell| (cell.counts.clone(), cell.occurrences))
+                .collect::<Vec<_>>()
+        };
 
         assert_eq!(one.runs, options.runs);
         assert_eq!(one.seed, options.seed);

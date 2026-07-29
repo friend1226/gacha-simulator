@@ -7,14 +7,14 @@ pub mod ir;
 pub mod numeric;
 pub mod rational;
 pub mod report;
-pub mod state;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod snapshot;
+pub mod state;
 
 pub use compile::{compile, CompiledModel, Diagnostic, Severity};
-pub use engine_dp::{run_dp, DpOptions, DpResult, DpRunResult};
 #[cfg(not(target_arch = "wasm32"))]
 pub use engine_dp::{restore_dp_snapshot, run_dp_with_snapshots, SnapshotRunError};
+pub use engine_dp::{run_dp, DpOptions, DpResult, DpRunResult};
 pub use engine_exact::{
     run_exact, ExactFirstHitResult, ExactOptions, ExactProbability, ExactResult,
 };

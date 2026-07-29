@@ -1,38 +1,59 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Braces, ChevronDown, CircleAlert, CircleCheck, FlaskConical, Play, RotateCcw } from "lucide-react";
-import { Blockly, loadIr, toolbox, workspaceToIr } from "./blockly";
+import { BookOpen, FlaskConical, RotateCcw, Save, Settings, Upload } from "lucide-react";
+import { Blockly, installWorkspaceVolume, loadIr, toolbox, workspaceToIr } from "./blockly";
 import { loadEngineBackend, runDpJson } from "./engine";
-import { blueArchive } from "./preset";
-import type { ModelIr } from "./types";
+import { blueArchive, presets } from "./preset";
+import { loadSettings, normalizeSettings, saveSettings, type AppSettings } from "./settings";
+import { normalizeFirstHit } from "./firstHit";
+import type { Diagnostic, EngineResult, ModelIr } from "./types";
 import { validateLocally } from "./validator";
+import { HelpPanel } from "./panels/HelpPanel";
+import { ModelPanel } from "./panels/ModelPanel";
+import { ResultPanel } from "./panels/ResultPanel";
+import { SettingsPanel } from "./panels/SettingsPanel";
 
-type Tab = "blocks" | "json";
+type TopTab = "model" | "results" | "help" | "settings";
+const MODEL_STORAGE = "gacha-lab.model.v2";
+
+function initialModel(): ModelIr {
+  try {
+    const source = localStorage.getItem(MODEL_STORAGE);
+    return source ? JSON.parse(source) as ModelIr : structuredClone(blueArchive);
+  } catch {
+    return structuredClone(blueArchive);
+  }
+}
 
 export function App() {
   const blockHost = useRef<HTMLDivElement>(null);
   const workspace = useRef<Blockly.WorkspaceSvg>();
-  const [model, setModel] = useState<ModelIr>(blueArchive);
-  const modelRef = useRef<ModelIr>(blueArchive);
-  const [json, setJson] = useState(JSON.stringify(blueArchive, null, 2));
-  const [tab, setTab] = useState<Tab>("blocks");
-  const [advanced, setAdvanced] = useState(false);
-  const [runMessage, setRunMessage] = useState("모델을 검증한 뒤 엔진을 선택하세요.");
-  const [result, setResult] = useState<{
-    engine: string;
-    trackedLeafIds: string[];
-    clampEvents: number;
-    joint: Array<{ counts: number[]; probability?: number; occurrences?: number; interval?: { estimate: number; lower: number; upper: number } }>;
-  } | null>(null);
+  const [model, setModel] = useState<ModelIr>(initialModel);
+  const modelRef = useRef(model);
+  const [json, setJson] = useState(() => JSON.stringify(model, null, 2));
+  const [topTab, setTopTab] = useState<TopTab>("model");
+  const [editorTab, setEditorTab] = useState<"blocks" | "json">("blocks");
+  const [settings, setSettings] = useState<AppSettings>(loadSettings);
+  const settingsRef = useRef(settings);
+  const [selectedPreset, setSelectedPreset] = useState("blue-archive-pickup");
+  const [helpCode, setHelpCode] = useState<string>();
+  const [message, setMessage] = useState("모델을 검증한 뒤 계산 방식을 선택하세요.");
+  const [running, setRunning] = useState<"dp" | "mc">();
+  const [results, setResults] = useState<{ dp?: EngineResult; mc?: EngineResult }>({});
   const validation = useMemo(() => validateLocally(model), [model]);
-  const hasError = validation.diagnostics.some((d) => d.severity === "error");
+  const hasError = validation.diagnostics.some((item) => item.severity === "error");
 
-  useEffect(() => { modelRef.current = model; }, [model]);
+  useEffect(() => {
+    modelRef.current = model;
+    localStorage.setItem(MODEL_STORAGE, JSON.stringify(model));
+  }, [model]);
+  useEffect(() => { settingsRef.current = settings; saveSettings(settings); }, [settings]);
 
   useEffect(() => {
     if (!blockHost.current || workspace.current) return;
     const ws = Blockly.inject(blockHost.current, {
       toolbox,
-      renderer: "zelos",
+      renderer: "thrasos",
+      sounds: true,
       theme: Blockly.Theme.defineTheme("gacha", {
         name: "gacha",
         base: Blockly.Themes.Classic,
@@ -46,11 +67,12 @@ export function App() {
         },
       }),
       grid: { spacing: 24, length: 3, colour: "#2a303d", snap: true },
-      zoom: { controls: true, wheel: true, startScale: 0.85 },
+      zoom: { controls: true, wheel: true, startScale: 0.8 },
       trashcan: true,
     });
     workspace.current = ws;
-    loadIr(ws, blueArchive);
+    installWorkspaceVolume(ws, () => settingsRef.current.soundVolume);
+    loadIr(ws, modelRef.current);
     const listener = (event: Blockly.Events.Abstract) => {
       if (event.isUiEvent) return;
       const next = workspaceToIr(ws, modelRef.current);
@@ -60,180 +82,147 @@ export function App() {
     ws.addChangeListener(listener);
     const resize = () => Blockly.svgResize(ws);
     window.addEventListener("resize", resize);
-    return () => { window.removeEventListener("resize", resize); ws.dispose(); workspace.current = undefined; };
+    return () => {
+      window.removeEventListener("resize", resize);
+      ws.dispose();
+      workspace.current = undefined;
+    };
   }, []);
+
+  useEffect(() => {
+    if (topTab === "model" && workspace.current) {
+      requestAnimationFrame(() => Blockly.svgResize(workspace.current!));
+    }
+  }, [topTab]);
+
+  function setModelSynced(next: ModelIr, reloadBlocks = false) {
+    setModel(next);
+    setJson(JSON.stringify(next, null, 2));
+    if (reloadBlocks && workspace.current) loadIr(workspace.current, next);
+  }
 
   function applyJson() {
     try {
       const next = JSON.parse(json) as ModelIr;
-      setModel(next);
-      if (workspace.current) loadIr(workspace.current, next);
-      setRunMessage("JSON을 블록 워크스페이스에 적용했습니다.");
+      setModelSynced(next, true);
+      setMessage("JSON을 블록 워크스페이스에 적용했습니다.");
     } catch (error) {
-      setRunMessage(`JSON 오류: ${String(error)}`);
+      setMessage(`JSON 오류: ${String(error)}`);
     }
   }
 
-  function reset() {
-    const next = structuredClone(blueArchive);
-    setModel(next);
-    setJson(JSON.stringify(next, null, 2));
-    if (workspace.current) loadIr(workspace.current, next);
-    setRunMessage("블루 아카이브 프리셋을 불러왔습니다.");
+  function loadPreset(id = selectedPreset) {
+    const preset = presets.find((item) => item.id === id) ?? presets[0];
+    setSelectedPreset(preset.id);
+    const next = structuredClone(preset.model);
+    next.run.numeric = settingsRef.current.numeric;
+    setModelSynced(next, true);
+    setResults({});
+    setMessage(`${preset.meta.game} · ${preset.meta.banner} 프리셋을 불러왔습니다.`);
   }
 
-  async function run(engine: "dp" | "mc") {
+  function updateSettings(patch: Partial<AppSettings>) {
+    setSettings((current) => normalizeSettings({ ...current, ...patch }));
+  }
+
+  function focusDiagnostic(diagnostic: Diagnostic) {
+    if (diagnostic.blockId && workspace.current) workspace.current.centerOnBlock(diagnostic.blockId);
+  }
+
+  function openHelp(code: string) {
+    setHelpCode(code);
+    setTopTab("help");
+    requestAnimationFrame(() => document.getElementById(`help-${code}`)?.scrollIntoView({ block: "center" }));
+  }
+
+  async function run(engine: "dp" | "mc", runs: number, seed: number) {
     if (hasError) {
-      setRunMessage("오류를 해결한 뒤 실행할 수 있습니다.");
+      setMessage("모델 오류를 해결한 뒤 실행할 수 있습니다.");
+      setTopTab("model");
       return;
     }
-    setRunMessage(engine === "dp" ? "마르코프 DP 실행 준비 중…" : "몬테카를로 실행 준비 중…");
+    setRunning(engine);
+    setMessage(engine === "dp" ? "정확 계산을 실행하는 중…" : "시뮬레이션을 실행하는 중…");
     try {
       const backend = await loadEngineBackend();
+      const source = JSON.stringify(model);
       const execution = engine === "dp"
         ? await runDpJson(backend, model)
-        : {
-            engine: "MC" as const,
-            json: await backend.runMcJson(JSON.stringify(model), 100_000, 42),
-          };
-      const parsed = JSON.parse(execution.json);
-      const clampEvents = parsed.clampEvents ?? 0;
-      setResult({
-        engine: execution.engine,
+        : { engine: "MC" as const, json: await backend.runMcJson(source, runs, seed) };
+      const parsed = JSON.parse(execution.json) as Partial<EngineResult>;
+      const result: EngineResult = {
+        engine: execution.engine === "EXACT" ? "Exact" : execution.engine,
+        numeric: parsed.numeric ?? (engine === "mc" ? model.run.numeric : "scaled"),
+        trials: parsed.trials ?? model.run.maxTrials,
+        runs: parsed.runs,
+        seed: parsed.seed,
         trackedLeafIds: parsed.trackedLeafIds ?? [],
-        clampEvents,
         joint: parsed.joint ?? [],
-      });
-      const clampMessage = clampEvents > 0 ? ` · 확률 보정 ${clampEvents}회` : "";
-      setRunMessage(`${execution.engine} 완료 · ${parsed.joint?.length ?? 0}개 결과 셀 · ${parsed.elapsedMs ?? 0}ms${clampMessage}`);
+        firstHit: normalizeFirstHit(parsed.firstHit, parsed.runs),
+        prunedMass: parsed.prunedMass ?? 0,
+        elapsedMs: parsed.elapsedMs ?? 0,
+        clampEvents: parsed.clampEvents ?? 0,
+        accumulatorClampEvents: parsed.accumulatorClampEvents ?? 0,
+        trialSeries: parsed.trialSeries,
+        modelHash: parsed.modelHash,
+      };
+      setResults((current) => engine === "mc" ? { ...current, mc: result } : { ...current, dp: result });
+      setMessage(`${engine === "dp" ? "정확 계산" : "시뮬레이션"} 완료 · ${result.joint.length.toLocaleString()}개 결과 셀 · ${result.elapsedMs}ms`);
+      setTopTab("results");
     } catch (error) {
-      const message = String(error);
-      if (message.includes("dynamically imported module") || message.includes("Cannot find module")) {
-        setRunMessage("WASM 패키지가 아직 배치되지 않았습니다. 루트에서 wasm-pack build crates/gacha-wasm --target web --out-dir ../../ui/public/wasm 를 실행하세요.");
-      } else {
-        setRunMessage(`실행 오류: ${message}`);
-      }
+      const text = String(error);
+      setMessage(text.includes("dynamically imported module") || text.includes("Cannot find module")
+        ? "WASM 패키지가 없습니다. 루트에서 wasm-pack build 명령을 실행하세요."
+        : `실행 오류: ${text}`);
+    } finally {
+      setRunning(undefined);
     }
   }
 
+  function saveModel() {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(model, null, 2)], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = "gacha-model.json"; anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function openModel(file?: File) {
+    if (!file) return;
+    try {
+      setModelSynced(JSON.parse(await file.text()) as ModelIr, true);
+      setMessage(`${file.name}을 불러왔습니다.`);
+    } catch (error) {
+      setMessage(`모델 파일 오류: ${String(error)}`);
+    }
+  }
+
+  const preset = presets.find((item) => item.id === selectedPreset) ?? presets[0];
   return (
     <div className="app-shell">
-      <header>
+      <header className="app-header">
         <div className="brand"><FlaskConical size={22} /><span>Gacha Lab</span><b>β</b></div>
-        <div className="header-meta"><span>Model IR v1</span><button onClick={reset}><RotateCcw size={15} /> 프리셋 초기화</button></div>
+        <nav className="top-tabs">
+          <button className={topTab === "model" ? "active" : ""} onClick={() => setTopTab("model")}>모델</button>
+          <button className={topTab === "results" ? "active" : ""} onClick={() => setTopTab("results")}>결과</button>
+          <button className={topTab === "help" ? "active" : ""} onClick={() => setTopTab("help")}><BookOpen size={14} /> 도움말</button>
+          <button className={topTab === "settings" ? "active" : ""} onClick={() => setTopTab("settings")}><Settings size={14} /> 설정</button>
+        </nav>
+        <div className="header-actions">
+          <select value={selectedPreset} onChange={(event) => loadPreset(event.target.value)}>{presets.map((item) => <option value={item.id} key={item.id}>{item.meta.game} · {item.meta.banner}</option>)}</select>
+          <span className={`source-badge ${preset.meta.confidence === "official" ? "official" : ""}`}>{preset.meta.confidence}</span>
+          <button onClick={() => loadPreset()}><RotateCcw size={14} /> 초기화</button>
+          <button onClick={saveModel}><Save size={14} /> 저장</button>
+          <label className="file-button"><Upload size={14} /> 열기<input type="file" accept=".json,application/json" onChange={(event) => openModel(event.target.files?.[0])} /></label>
+        </div>
       </header>
-
-      <main>
-        <section className="editor">
-          <div className="toolbar">
-            <div className="tabs">
-              <button className={tab === "blocks" ? "active" : ""} onClick={() => setTab("blocks")}><Activity size={16} /> 블록</button>
-              <button className={tab === "json" ? "active" : ""} onClick={() => setTab("json")}><Braces size={16} /> IR JSON</button>
-            </div>
-            <div className="model-name">{model.name}</div>
-          </div>
-          <div className={tab === "blocks" ? "block-host visible" : "block-host"} ref={blockHost} />
-          {tab === "json" && (
-            <div className="json-pane">
-              <textarea value={json} onChange={(event) => setJson(event.target.value)} spellCheck={false} />
-              <button className="apply" onClick={applyJson}>JSON 적용</button>
-            </div>
-          )}
-        </section>
-
-        <aside>
-          <div className="aside-title"><span>컴파일 결과</span><span className={hasError ? "status bad" : "status good"}>{hasError ? "오류" : "정상"}</span></div>
-          <div className="leaf-list">
-            {validation.leaves.map((leaf) => (
-              <div className="leaf-row" key={leaf.id}>
-                <span>{leaf.name}<small>{leaf.id}</small></span>
-                <code>{leaf.probability.toFixed(6)}</code>
-              </div>
-            ))}
-            <div className="total"><span>합계</span><strong>{validation.leaves.reduce((s, l) => s + l.probability, 0).toFixed(6)}</strong></div>
-          </div>
-
-          <div className="analysis">
-            <h3>분석</h3>
-            <Metric ok label="마르코프 분석" value={validation.estimatedStates <= 50_000_000 ? "가능" : "제한"} />
-            <Metric label="제어 상태" value={validation.controlStates.toLocaleString()} />
-            <Metric label="예상 결합 상태" value={`~${validation.estimatedStates.toLocaleString()}`} />
-            <Metric label="수치 백엔드" value={model.run.numeric === "scaled" ? "표준" : model.run.numeric} />
-          </div>
-
-          <div className="diagnostics">
-            {validation.diagnostics.map((item, index) => (
-              <button key={`${item.code}-${index}`} onClick={() => {
-                if (item.blockId && workspace.current) workspace.current.centerOnBlock(item.blockId);
-              }}>
-                {item.severity === "error" ? <CircleAlert size={16} /> : <CircleCheck size={16} />}
-                <span><b>{item.code}</b>{item.message}</span>
-              </button>
-            ))}
-          </div>
-
-          <button className="advanced" onClick={() => setAdvanced(!advanced)}>
-            고급 설정 <ChevronDown size={16} className={advanced ? "open" : ""} />
-          </button>
-          {advanced && (
-            <div className="advanced-panel">
-              <label>수치 모드
-                <select value={model.run.numeric} onChange={(event) => {
-                  const next = { ...model, run: { ...model.run, numeric: event.target.value as ModelIr["run"]["numeric"] } };
-                  setModel(next); setJson(JSON.stringify(next, null, 2));
-                }}>
-                  <option value="scaled">표준 (권장)</option>
-                  <option value="f64">고속</option>
-                  <option value="exact">정확</option>
-                </select>
-              </label>
-            </div>
-          )}
-
-          <div className="run-box">
-            <div className="run-actions">
-              <button disabled={hasError} onClick={() => run("dp")}><Play size={16} /> DP 실행</button>
-              <button disabled={hasError} className="secondary" onClick={() => run("mc")}><Play size={16} /> MC 실행</button>
-            </div>
-            <p>{runMessage}</p>
-          </div>
-          {result && (
-            <div className="result-panel">
-              <div className="result-title">
-                <span>{result.engine} 결과</span>
-                <small>
-                  상위 {Math.min(30, result.joint.length)}개 셀
-                  {result.clampEvents > 0 && ` · 확률 보정 ${result.clampEvents}회`}
-                </small>
-              </div>
-              <div className="result-head">
-                <span>{result.trackedLeafIds.join(" · ") || "집계"}</span><span>확률</span>
-              </div>
-              {result.joint.slice().sort((a, b) => {
-                const pa = a.probability ?? a.interval?.estimate ?? 0;
-                const pb = b.probability ?? b.interval?.estimate ?? 0;
-                return pb - pa;
-              }).slice(0, 30).map((cell, index) => {
-                const probability = cell.probability ?? cell.interval?.estimate ?? 0;
-                return (
-                  <div className="result-row" key={`${cell.counts.join("-")}-${index}`}>
-                    <span>{cell.counts.join(" × ")}</span>
-                    <span className="probability">
-                      <i style={{ width: `${Math.min(100, probability * 400)}%` }} />
-                      <code>{probability.toExponential(5)}</code>
-                      {cell.interval && <small>95% {cell.interval.lower.toExponential(2)}–{cell.interval.upper.toExponential(2)}</small>}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </aside>
+      <main className="app-main">
+        <div hidden={topTab !== "model"} className="tab-fill">
+          <ModelPanel blockHost={blockHost} editorTab={editorTab} setEditorTab={setEditorTab} model={model} json={json} setJson={setJson} applyJson={applyJson} validation={validation} focusDiagnostic={focusDiagnostic} openHelp={openHelp} />
+        </div>
+        {topTab === "results" && <ResultPanel model={model} updateModel={(next) => setModelSynced(next)} settings={settings} results={results} running={running} message={message} run={run} />}
+        {topTab === "help" && <HelpPanel focusCode={helpCode} />}
+        {topTab === "settings" && <SettingsPanel settings={settings} update={updateSettings} />}
       </main>
     </div>
   );
-}
-
-function Metric({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
-  return <div className="metric"><span>{ok && <CircleCheck size={15} />} {label}</span><strong>{value}</strong></div>;
 }

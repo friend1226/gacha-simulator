@@ -52,7 +52,8 @@ npm install
 npm run dev
 ```
 
-`http://localhost:5173`에서 블록 에디터·JSON 편집·실시간 검증 패널을 쓸 수 있습니다.
+`http://localhost:5173`에서 모델/결과/도움말/설정 탭, 컨테이너형 Blockly 편집기,
+피벗 히트맵과 시행·첫 달성 차트를 쓸 수 있습니다.
 
 > **주의**: Vite 개발 서버는 `public/` 자산을 소스 코드에서 동적 import하는 것을
 > 허용하지 않아서, `npm run dev`에서는 "DP 실행"/"MC 실행" 버튼이 동작하지

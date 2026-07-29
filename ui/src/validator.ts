@@ -83,12 +83,20 @@ export function validateLocally(ir: ModelIr): ValidationView {
   diagnostics.push({ code: "W002", severity: "info", message: "남는 확률은 ‘그외’ 리프로 자동 편입됩니다" });
 
   let controlStates = 1;
+  let accumulatorStates = 1;
   for (const variable of ir.stateVars) {
-    if (!Number.isInteger(variable.max) || variable.max < 0) {
+    if (!Number.isInteger(variable.max) || (variable.max ?? -1) < 0) {
       diagnostics.push({ code: "E004", severity: "error", message: `${variable.id}의 상한이 필요합니다`, blockId: variable.blockId });
-    } else controlStates *= variable.max + 1;
+    } else if (variable.role === "control") {
+      controlStates *= (variable.max ?? 0) + 1;
+    } else if (variable.role === "accumulator") {
+      accumulatorStates *= (variable.max ?? 0) + 1;
+    } else {
+      diagnostics.push({ code: "E009", severity: "error", message: `${variable.id}: stat 변수는 직접 선언할 수 없습니다`, blockId: variable.blockId });
+    }
   }
-  const estimatedStates = controlStates * (ir.run.maxTrials + 1) ** Math.max(0, ir.run.trackJoint.length - 1);
+  const estimatedStates = controlStates * accumulatorStates
+    * (ir.run.maxTrials + 1) ** Math.max(0, ir.run.trackJoint.length - 1);
   if (estimatedStates > 50_000_000) diagnostics.push({ code: "W004", severity: "warning", message: "예상 상태 공간이 DP 권장 한계를 초과합니다" });
   return { diagnostics, leaves, controlStates, estimatedStates, exactAvailable: true };
 }

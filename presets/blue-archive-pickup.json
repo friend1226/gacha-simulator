@@ -7,7 +7,7 @@
     "confidence": "official",
     "notes": "200회 모집 포인트 교환을 확정 지급으로 모델링"
   },
-  "irVersion": 1,
+  "irVersion": 2,
   "name": "블루 아카이브 픽업 모집",
   "entities": [
     {
@@ -37,7 +37,7 @@
   "run": {
     "maxTrials": 200,
     "trackJoint": ["pickup", "star3__self"],
-    "numeric": "scaled"
+    "numeric": "scaled",
+    "trialSeries": "marginal"
   }
 }
-

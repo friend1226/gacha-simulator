@@ -33,7 +33,7 @@ cd ui && npx tsc --noEmit && npm test
 crates/gacha-core/src/
   rational.rs    정확 리터럴 파서 ("0.007" → 7/1000). f64 경유 금지
   numeric.rs     Prob trait + F64 / ScaledF64 (mantissa f64 + exponent i64)
-  ir.rs          Model IR v1 역직렬화
+  ir.rs          Model IR v1/v2 역직렬화
   expr.rs        표현식 AST → 스택 바이트코드, 유리수 평가
   compile.rs     엔티티 트리 → 배타적 리프, 확률표 사전계산, 진단, 전이/트리거
   engine_mc.rs   xoshiro256++ + alias sampling + Wilson 구간

@@ -1,9 +1,7 @@
 use gacha_core::engine_dp::{DpOptions, DpResult, DpRunResult};
 use gacha_core::engine_exact::ExactOptions;
 use gacha_core::report::wilson;
-use gacha_core::{
-    compile, run_dp, run_exact, run_mc, McOptions, ModelIr,
-};
+use gacha_core::{compile, run_dp, run_exact, run_mc, McOptions, ModelIr};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{Signed, ToPrimitive, Zero};
@@ -49,12 +47,8 @@ fn compile_nested_model(
 }
 
 fn run_scaled(model: &gacha_core::CompiledModel) -> DpResult {
-    let result = run_dp(
-        model,
-        DpOptions { prune_log10: None },
-        |_, _| true,
-    )
-    .expect("scaled DP must run");
+    let result =
+        run_dp(model, DpOptions { prune_log10: None }, |_, _| true).expect("scaled DP must run");
 
     match result {
         DpRunResult::Approximate(result) => result,
@@ -145,12 +139,8 @@ fn exact_and_scaled_dp_agree_to_ten_decimal_places_including_extreme_tail() {
 
     let scaled = run_scaled(&compile(&scaled_ir).expect("scaled IR must compile"));
     let exact_model = compile(&exact_ir).expect("exact IR must compile");
-    let exact = run_exact(
-        &exact_model,
-        ExactOptions::default(),
-        |_, _| true,
-    )
-    .expect("exact DP must run");
+    let exact =
+        run_exact(&exact_model, ExactOptions::default(), |_, _| true).expect("exact DP must run");
 
     assert_eq!(scaled.joint.len(), exact.joint.len());
     let scaled_cells: HashMap<_, _> = scaled
