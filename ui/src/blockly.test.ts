@@ -8,6 +8,7 @@ const presetModules = import.meta.glob("../../presets/*.json", {
   eager: true,
   import: "default",
 }) as Record<string, ModelIr>;
+const blueArchivePreset = presetByFile("blue-archive-pickup.json");
 
 describe("Blockly IR round trip", () => {
   for (const [path, preset] of Object.entries(presetModules)) {
@@ -23,7 +24,7 @@ describe("Blockly IR round trip", () => {
   }
 
   it("keeps unsupported rules while supported blocks are edited", () => {
-    const model = structuredClone(Object.values(presetModules)[0]);
+    const model = structuredClone(blueArchivePreset);
     model.stateVars.push({ id: "legacyStat", init: 0, max: 5, role: "stat" });
     model.run.condition = { or: [{ ge: [{ var: "nPickup" }, { lit: "1" }] }] };
     const workspace = new Blockly.Workspace();
@@ -44,7 +45,7 @@ describe("Blockly IR round trip", () => {
   });
 
   it("preserves a general probability rule that has no block representation", () => {
-    const model = structuredClone(Object.values(presetModules)[0]);
+    const model = structuredClone(blueArchivePreset);
     model.probRules = [{
       target: model.entities[0].id,
       expr: {
@@ -63,7 +64,7 @@ describe("Blockly IR round trip", () => {
   });
 
   it("removes a preserved condition warning after a block condition replaces it", () => {
-    const model = structuredClone(Object.values(presetModules)[0]);
+    const model = structuredClone(blueArchivePreset);
     model.run.condition = { or: [{ ge: [{ var: "nPickup" }, { lit: "1" }] }] };
     const workspace = new Blockly.Workspace();
     try {
@@ -141,4 +142,12 @@ function normalizeForRoundTrip(model: ModelIr): unknown {
     grant.appliesTransitions ??= true;
   }
   return stripBlockIds(normalized);
+}
+
+function presetByFile(filename: string): ModelIr {
+  const preset = Object.entries(presetModules)
+    .find(([path]) => path.endsWith(`/${filename}`))
+    ?.[1];
+  if (!preset) throw new Error(`missing preset fixture: ${filename}`);
+  return preset;
 }

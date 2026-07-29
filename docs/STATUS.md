@@ -453,3 +453,36 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   117.5초에 통과했다. `npx tsc --noEmit`, UI 23/23, 1,602개 모듈의
   프로덕션 빌드도 통과했다. 브라우저 개발자 로그는 0건이었고 375px에서
   `clientWidth=360`, `scrollWidth=360`이었다.
+
+## 2026-07-29 FIX D — Arknights 첫 10회 보장 프리셋
+
+- Arknights `Standard Headhunting 첫 10회 보장` 프리셋을 추가했다. 출처는
+  `https://arknights.wiki.gg/wiki/Headhunting`이며, 첫 10회 안에 최소 5★가
+  나온다는 위키 원문을 notes에 그대로 남겼다. 보장 슬롯의 6★/5★ 20/80은
+  기본 2:8 확률의 재정규화 추정이므로 confidence는 `community-estimate`다.
+- 이 모델은 `maxTrials=10`에서만 유효하다. 시행 횟수를 더 늘리면 실제와
+  달라지고 50회 이후 6★ 소프트 천장도 포함하지 않는다고 notes에 명시했다.
+  보장 슬롯을 5★ 확정으로 해석할 때의 대안 기대값 `E[6★]=0.1922516`도 함께
+  기록해 가정의 차이가 드러나게 했다.
+- 별도 스키마 확장 없이 `highSeen` 제어 변수와 10번째 시행 조건부
+  `probRules`로 보장 슬롯을 표현했다. `validate` 결과 blocker 0,
+  `controlStates=2`, `statStates=14,641`, `totalStates=29,282`,
+  `exactAvailable=true`였다.
+- Exact 실행은 275개 셀, 남은 질량 1, `peakStates=275`,
+  `clampEvents=0`, `accumulatorClampEvents=0`이었다. 기대값은
+  `[0.26973568802, 1.07894275208, 4.806289755500002,
+  3.8450318043999987]`이고 합은 10이다. 별도 불변식 테스트에서
+  `P(5★도 6★도 없음)=0`, counts 합이 10이 아닌 셀 0개,
+  `E[6★]=0.26973568802`를 확인했다.
+- 새 골든의 preset SHA-256은
+  `77a0251a52462a7362541089dc7b56fad2a3f024f04d9cb5cb17977931a45dd5`,
+  result SHA-256은
+  `d699c6d19a1384b8ffd5e4c524213829e8a6a09814ba9a65e177238ac6d47588`다.
+  기존 `simple-pity`, `blue-archive-pickup` 골든도 변경 없이 통과했다.
+- `cargo test --workspace --exclude gacha-tauri`는 Rust 55/55를 107.1초에
+  통과했다. UI strict 타입 검사, 8개 파일의 24/24 테스트, 1,603개 모듈의
+  프로덕션 빌드도 통과했다.
+- 실제 프로덕션 미리보기에서 프리셋을 불러와 Exact 계산이 275개 셀·6ms,
+  모델 해시 `944d046c527df830889a72b6dc47ffb5540d279b6d41b09a934950830e53a73f`로
+  완료되는 것을 확인했다. 375px에서 `clientWidth=360`,
+  `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.

@@ -1,0 +1,94 @@
+{
+  "$preset": {
+    "game": "Arknights",
+    "banner": "Standard Headhunting 첫 10회 보장",
+    "sourceUrl": "https://arknights.wiki.gg/wiki/Headhunting",
+    "verifiedDate": "2026-07-29",
+    "confidence": "community-estimate",
+    "notes": "위키 원문: \"A 5★ (at minimum) Operator is guaranteed to appear in any of the first ten pulls.\" 이 프리셋은 첫 10회 보장만 모델링하며 maxTrials=10 전용이다. 시행 횟수를 10보다 크게 늘리면 실제와 다르다. 50회 이후 6★ 소프트 천장은 포함하지 않는다. 보장 슬롯의 6★/5★ 20/80은 기본 확률 2:8 재정규화 추정이다. 5★ 확정으로 가정하면 E[6★]=0.1922516이므로 이 가정이 결과를 가른다."
+  },
+  "irVersion": 2,
+  "name": "Arknights Standard Headhunting 첫 10회 보장",
+  "entities": [
+    { "id": "star6", "name": "6★", "prob": { "lit": "0.02" } },
+    { "id": "star5", "name": "5★", "prob": { "lit": "0.08" } },
+    { "id": "star4", "name": "4★", "prob": { "lit": "0.5" } },
+    { "id": "star3", "name": "3★", "prob": { "lit": "0.4" } }
+  ],
+  "nestingPolicy": "error",
+  "stateVars": [
+    { "id": "highSeen", "init": 0, "max": 1, "role": "control" }
+  ],
+  "probRules": [
+    {
+      "target": "star6",
+      "expr": {
+        "if": {
+          "and": [
+            { "eq": [{ "trial": true }, { "lit": "10" }] },
+            { "eq": [{ "var": "highSeen" }, { "lit": "0" }] }
+          ]
+        },
+        "then": { "lit": "0.2" },
+        "else": { "lit": "0.02" }
+      }
+    },
+    {
+      "target": "star5",
+      "expr": {
+        "if": {
+          "and": [
+            { "eq": [{ "trial": true }, { "lit": "10" }] },
+            { "eq": [{ "var": "highSeen" }, { "lit": "0" }] }
+          ]
+        },
+        "then": { "lit": "0.8" },
+        "else": { "lit": "0.08" }
+      }
+    },
+    {
+      "target": "star4",
+      "expr": {
+        "if": {
+          "and": [
+            { "eq": [{ "trial": true }, { "lit": "10" }] },
+            { "eq": [{ "var": "highSeen" }, { "lit": "0" }] }
+          ]
+        },
+        "then": { "lit": "0" },
+        "else": { "lit": "0.5" }
+      }
+    },
+    {
+      "target": "star3",
+      "expr": {
+        "if": {
+          "and": [
+            { "eq": [{ "trial": true }, { "lit": "10" }] },
+            { "eq": [{ "var": "highSeen" }, { "lit": "0" }] }
+          ]
+        },
+        "then": { "lit": "0" },
+        "else": { "lit": "0.4" }
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "when": {
+        "or": [
+          { "leafOf": "star6" },
+          { "leafOf": "star5" }
+        ]
+      },
+      "set": { "highSeen": { "lit": "1" } }
+    }
+  ],
+  "triggers": [],
+  "run": {
+    "maxTrials": 10,
+    "trackJoint": ["star6", "star5", "star4", "star3"],
+    "numeric": "exact",
+    "trialSeries": "marginal"
+  }
+}
