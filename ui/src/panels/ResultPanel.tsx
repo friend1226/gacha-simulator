@@ -1,4 +1,4 @@
-import { Copy, Download, Play } from "lucide-react";
+import { Copy, Download, Play, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { defaultAxes, pivot, pivotKey, probabilityOf, toCsv, type Axis, type AxisRole, type PivotCell } from "../pivot";
 import { engineLabels } from "../labels";
@@ -11,16 +11,20 @@ export function ResultPanel({
   settings,
   results,
   running,
+  canCancel,
   message,
   run,
+  cancelRun,
 }: {
   model: ModelIr;
   updateModel: (model: ModelIr) => void;
   settings: AppSettings;
   results: { dp?: EngineResult; mc?: EngineResult };
   running?: "dp" | "mc";
+  canCancel: boolean;
   message: string;
   run: (engine: "dp" | "mc", runs: number, seed: number) => void;
+  cancelRun: () => void;
 }) {
   const ids = results.dp?.trackedLeafIds ?? results.mc?.trackedLeafIds ?? model.run.trackJoint;
   const [axes, setAxes] = useState<Axis[]>(() => defaultAxes(ids));
@@ -53,6 +57,7 @@ export function ResultPanel({
         <div className="run-buttons">
           <button disabled={Boolean(running)} onClick={() => run("dp", runs, seed)}><Play size={15} /> 정확 계산</button>
           <button disabled={Boolean(running)} className="secondary" onClick={() => run("mc", runs, seed)}><Play size={15} /> 시뮬레이션</button>
+          {running && canCancel && <button className="cancel" onClick={cancelRun}><Square size={14} /> 취소</button>}
         </div>
         <p>{message}</p>
       </div>
