@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: netlify-production
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   test-build-deploy:
@@ -48,7 +48,9 @@ jobs:
       - name: Build production UI
         run: npm --prefix ui run build
       - name: Verify WebAssembly deploy artifact
-        run: test -f ui/dist/wasm/gacha_wasm_bg.wasm
+        run: |
+          test -f ui/dist/wasm/gacha_wasm.js
+          test -f ui/dist/wasm/gacha_wasm_bg.wasm
 
       - name: Verify Netlify credentials
         env:
