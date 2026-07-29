@@ -302,3 +302,35 @@ M9 완료를 막지 않아 남긴 것들이다. 착수할 때 이 항목을 지�
   로딩은 현재 시작 탭 구조에서 즉시 다시 로드돼 효과가 불분명하므로 보류했다.
 - `vite.config.ts`에 React 플러그인을 등록했다. 프로덕션 빌드가 통과하고 실제 개발
   서버 응답에 React Refresh 프리앰블과 컴포넌트 변환이 모두 포함되는 것을 확인했다.
+
+## 2026-07-29 Netlify 프로덕션 배포
+
+`.github/workflows/deploy.yml`로 GitHub Actions에서 빌드하고 완성된 `ui/dist`만
+Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. 프로덕션 URL은
+`https://gacha-simul.netlify.app`이다.
+
+- WASM 산출물은 저장소에 없으므로(`ui/public/wasm/.gitignore`가 `*`) 호스팅 서비스가
+  저장소를 클론해 `npm run build`만 돌리면 **빌드는 성공하는데 계산이 안 되는 사이트**가
+  나간다. 실제로 `ui/public/wasm`을 지우고 빌드하면 exit 0으로 성공하면서 `dist/`에
+  wasm이 빠지는 것을 확인했다. 이를 막기 위해 배포 직전 `dist/wasm/gacha_wasm.js`와
+  `gacha_wasm_bg.wasm` 존재를 검사하며, 둘 중 하나만 없어도 배포가 중단되는 것을
+  각각 확인했다.
+- 첫 실행은 `Type-check UI`에서 실패했다. `npm --prefix ui exec`는 npm의 패키지 해석
+  위치만 바꾸고 작업 디렉터리는 저장소 루트로 두므로 `tsc`가 `tsconfig.json`을 찾지
+  못해 도움말을 출력하고 종료 코드 1로 끝났다. 같은 워크플로의 `npm --prefix ui ci`와
+  `npm --prefix ui run build`는 npm 스크립트가 cwd를 패키지로 재설정해 통과했기 때문에
+  `exec` 단계만 깨졌다. UI 단계 전부를 `working-directory: ui`로 고정해 해소했다
+  (`033d473`).
+- 라이브 사이트 검증: 데스크톱 1280px에서 DP 484셀 36ms, MC 10만 회 3,129ms(seed 42,
+  모델 해시 DP와 일치), 모바일 375px에서 DP 484셀 21ms. 두 폭 모두 가로 넘침 없고
+  히트맵은 자체 스크롤하며 콘솔 오류 0건이다.
+- 응답 헤더 확인: `/wasm/*`는 `application/wasm`과 `max-age=0, must-revalidate`,
+  `/assets/*`는 `max-age=31536000, immutable`, `/index.html`은 재검증이다. 이름이
+  고정된 wasm에 장기 캐시가 걸리지 않아 재배포가 즉시 반영된다. Netlify가 wasm까지
+  brotli로 자동 압축한다.
+- Netlify 사이트의 Build status를 `stopped`로 두어도 CLI 프리빌트 배포는 정상
+  게시되는 것을 확인했다. Netlify 자체 빌드는 `netlify.toml`의 `ignore = "exit 0"`으로도
+  이중 차단한다.
+- 워크플로 로그에 Node.js 20 지원 종료 경고가 나온다. `actions/checkout@v4`,
+  `actions/setup-node@v4`, `jetli/wasm-pack-action@v0.4.0`이 해당하며 현재는 러너가
+  Node 24로 강제 실행해 동작한다. `ci.yml`도 같은 액션을 쓰므로 함께 올린다.
