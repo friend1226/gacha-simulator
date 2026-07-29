@@ -177,6 +177,7 @@ interface WorkspaceRoundTripState {
   transitions: PreservedItem<unknown>[];
   triggers: PreservedItem<unknown>[];
   condition?: Expr;
+  unsupported: UnsupportedBlockItem[];
 }
 
 interface ProbRuleBlockData {
@@ -245,6 +246,7 @@ export function workspaceToIr(workspace: Blockly.Workspace, previous: ModelIr): 
     probRules: [],
     transitions: [],
     triggers: [],
+    unsupported: [],
   };
   const entities = mergePreserved(
     chain(root.getInputTargetBlock("ENTITIES")).map(readEntity),
@@ -330,6 +332,10 @@ export function workspaceToIr(workspace: Blockly.Workspace, previous: ModelIr): 
         { lit: String(conditionBlock.getFieldValue("COUNT")) },
       ],
     };
+    if (preserved.condition) {
+      delete preserved.condition;
+      preserved.unsupported = preserved.unsupported.filter((item) => item.path !== "run.condition");
+    }
   }
   const run = { ...previous.run };
   if (condition) run.condition = condition;
@@ -345,6 +351,10 @@ export function workspaceToIr(workspace: Blockly.Workspace, previous: ModelIr): 
     triggers,
     run,
   };
+}
+
+export function getUnsupportedBlockItems(workspace: Blockly.Workspace): UnsupportedBlockItem[] {
+  return structuredClone(roundTripState.get(workspace)?.unsupported ?? []);
 }
 
 function createBlock(workspace: Blockly.Workspace, type: string): Blockly.Block {
@@ -504,6 +514,7 @@ export function loadIr(workspace: Blockly.Workspace, ir: ModelIr): UnsupportedBl
     probRules: [],
     transitions: [],
     triggers: [],
+    unsupported,
   };
   Blockly.Events.disable();
   try {

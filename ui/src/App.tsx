@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, FlaskConical, RotateCcw, Save, Settings, Upload } from "lucide-react";
-import { Blockly, installWorkspaceVolume, loadIr, toolbox, workspaceToIr, type UnsupportedBlockItem } from "./blockly";
+import { Blockly, getUnsupportedBlockItems, installWorkspaceVolume, loadIr, toolbox, workspaceToIr, type UnsupportedBlockItem } from "./blockly";
 import { EngineCancelledError, loadEngineBackend, runDpJson, type EngineBackend, type EngineProgress } from "./engine";
 import { parseEngineError, type EngineErrorPresentation } from "./engineDiagnostics";
 import { blueArchive, presets } from "./preset";
@@ -108,6 +108,7 @@ export function App() {
       const next = workspaceToIr(ws, modelRef.current);
       setModel(next);
       setJson(JSON.stringify(next, null, 2));
+      setUnsupportedBlockItems(getUnsupportedBlockItems(ws));
     };
     ws.addChangeListener(listener);
     const resize = () => Blockly.svgResize(ws);
