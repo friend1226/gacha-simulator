@@ -17,10 +17,15 @@ let wasmPromise: Promise<WasmEngine> | undefined;
 function loadWasm(): Promise<WasmEngine> {
   if (!wasmPromise) {
     const wasmPath = "/wasm/gacha_wasm.js";
-    wasmPromise = import(/* @vite-ignore */ wasmPath).then(async (wasm: WasmEngine) => {
-      await wasm.default?.();
-      return wasm;
-    });
+    wasmPromise = import(/* @vite-ignore */ wasmPath)
+      .then(async (wasm: WasmEngine) => {
+        await wasm.default?.();
+        return wasm;
+      })
+      .catch((error) => {
+        wasmPromise = undefined;
+        throw error;
+      });
   }
   return wasmPromise;
 }
