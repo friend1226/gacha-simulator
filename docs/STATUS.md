@@ -543,3 +543,25 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
 - 실제 프로덕션 미리보기에서 새 프리셋 이름과 배지, Exact 275셀·7ms,
   6★ 추이 최댓값 0.2를 확인했다. 375px에서 `innerWidth=375`,
   `clientWidth=360`, `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.
+
+## 2026-07-30 BACKLOG A — 출처 이탈 추적
+
+- 모델 provenance를 `pristine`·`dirty`·`none` 세 값으로 중앙화했다. 프리셋
+  로드만 pristine으로 만들고, Blockly 변경·JSON 적용·결과 탭 모델 변경은
+  프리셋에서 시작한 모델을 dirty로 만든다. 파일 열기와 localStorage 복구는
+  출처 대조 없이 none으로 둔다.
+- pristine 배지는 기존 출처 라벨을 유지하고 dirty는 `수정됨`을 함께 표시한다.
+  none은 배지를 숨기고 선택기에 `현재 모델 · 출처 없음`을 표시해 기본 Blue Archive
+  선택기가 다른 저장 모델의 출처처럼 보이던 문제를 막았다.
+- 저장 시 pristine이 아니면 복제본에서 `$preset`을 제거한다. 원본 모델은 변경하지
+  않으며 pristine 내보내기만 출처 메타데이터를 유지한다. 여섯 진입·변경 이벤트와
+  세 provenance의 내보내기를 순수 함수 테스트로 고정했다.
+- 실제 프로덕션 미리보기에서 Arknights 로드 직후에는 `커뮤니티 추정`,
+  JSON 적용과 시행 횟수 변경 뒤에는 `커뮤니티 추정 · 수정됨`을 확인했다.
+  새로고침 뒤 모델명은 Arknights로 유지되면서 선택기는 `현재 모델 · 출처 없음`,
+  출처 배지는 미표시였다. 프로그램식 프리셋 로드는 dirty를 유발하지 않았다.
+- `cargo test --workspace --exclude gacha-tauri`는 Rust 55/55를 100.4초에
+  통과했고 세 프리셋 골든은 불변이다. UI strict 타입 검사, 9개 파일의
+  28/28 테스트, 1,604개 모듈의 프로덕션 빌드가 통과했다. 375px에서
+  `innerWidth=375`, `clientWidth=360`, `scrollWidth=360`이었고 브라우저
+  개발자 로그는 0건이었다.

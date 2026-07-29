@@ -19,6 +19,7 @@ button { cursor: pointer; }
 .file-button input { display: none; }
 .source-badge { padding: 3px 7px; border-radius: 99px; background: #3a2d1d; color: #e8b968; font-size: 9px; }
 .source-badge.official { background: #18352c; color: #65d6a4; }
+.source-badge.modified { background: #2b2940; color: #bcb5e7; }
 .app-main, .tab-fill { min-width: 0; min-height: 0; height: 100%; overflow: auto; }
 .model-layout { min-width: 0; height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(560px, 1fr) 390px; }
 .editor { min-width: 0; position: relative; display: grid; grid-template-rows: 49px 1fr; }
