@@ -89,6 +89,14 @@ button { cursor: pointer; }
 .run-toolbar p { grid-column: 1 / -1; margin: 0; color: #727c8e; font-size: 11px; }
 .run-progress { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; color: #9ba4b5; font: 11px "IBM Plex Mono", monospace; }
 .run-progress progress { width: min(420px, 70%); height: 8px; accent-color: #725be2; }
+.engine-diagnostics { grid-column: 1 / -1; padding: 14px; border: 1px solid #754b56; border-radius: 10px; background: #2a1d22; }
+.engine-diagnostics h2 { margin: 0 0 10px; font-size: 14px; }
+.engine-diagnostics ul { margin: 0; padding-left: 20px; }
+.engine-diagnostics li { margin: 8px 0; }
+.engine-diagnostics li span { display: block; margin: 3px 0; color: #d7ccd0; }
+.engine-diagnostics li button { padding: 4px 8px; }
+.engine-diagnostics details { margin-top: 10px; }
+.engine-diagnostics pre { overflow: auto; white-space: pre-wrap; color: #c5bac0; }
 .track-picker { margin: 10px 0 18px; padding: 10px 14px; border: 1px solid #292f3b; border-radius: 8px; color: #9da6b6; font-size: 12px; }
 .track-picker div { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .track-picker label { padding: 5px 8px; background: #1b202a; border-radius: 6px; }
