@@ -32,12 +32,19 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: ui/package-lock.json
+      # `npm --prefix ui` only relocates package resolution; the command still runs
+      # in the repository root. `npm run` scripts happen to reset cwd to the package,
+      # but `npm exec` does not, so tsc looked for tsconfig.json at the root and
+      # printed its help instead of type-checking. Pin the directory explicitly.
       - name: Install UI dependencies
-        run: npm --prefix ui ci
+        working-directory: ui
+        run: npm ci
       - name: Type-check UI
-        run: npm --prefix ui exec tsc -- --noEmit
+        working-directory: ui
+        run: npx tsc --noEmit
       - name: Test UI
-        run: npm --prefix ui test
+        working-directory: ui
+        run: npm test
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
@@ -46,7 +53,8 @@ jobs:
       - name: Build WebAssembly
         run: wasm-pack build crates/gacha-wasm --target web --out-dir ../../ui/public/wasm
       - name: Build production UI
-        run: npm --prefix ui run build
+        working-directory: ui
+        run: npm run build
       - name: Verify WebAssembly deploy artifact
         run: |
           test -f ui/dist/wasm/gacha_wasm.js
