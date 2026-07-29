@@ -9,6 +9,7 @@ const presetModules = import.meta.glob("../../presets/*.json", {
   import: "default",
 }) as Record<string, ModelIr>;
 const blueArchivePreset = presetByFile("blue-archive-pickup.json");
+const arknightsPreset = presetByFile("arknights-first-ten-guarantee.json");
 
 describe("Blockly IR round trip", () => {
   for (const [path, preset] of Object.entries(presetModules)) {
@@ -58,6 +59,19 @@ describe("Blockly IR round trip", () => {
     try {
       expect(loadIr(workspace, model).map((item) => item.path)).toEqual(["probRules[0]"]);
       expect(normalizeForRoundTrip(workspaceToIr(workspace, model))).toEqual(normalizeForRoundTrip(model));
+    } finally {
+      workspace.dispose();
+    }
+  });
+
+  it("represents the Arknights first-ten guarantee without unsupported items", () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      expect(loadIr(workspace, arknightsPreset)).toEqual([]);
+      expect(workspace.getBlocksByType("trial_state_prob_rule", false)).toHaveLength(4);
+      expect(workspace.getBlocksByType("transition_or_set", false)).toHaveLength(1);
+      expect(normalizeForRoundTrip(workspaceToIr(workspace, arknightsPreset)))
+        .toEqual(normalizeForRoundTrip(arknightsPreset));
     } finally {
       workspace.dispose();
     }

@@ -88,6 +88,22 @@ Blockly.common.defineBlocksWithJsonArray([
     colour: 268,
   },
   {
+    type: "trial_state_prob_rule",
+    message0: "%1 확률: %2회이고 %3가 %4이면 %5 / 기본 %6",
+    args0: [
+      { type: "field_input", name: "TARGET", text: "star5" },
+      { type: "field_number", name: "TRIAL", value: 10, min: 1, precision: 1 },
+      { type: "field_input", name: "VAR", text: "highSeen" },
+      { type: "field_input", name: "STATE", text: "0" },
+      { type: "field_input", name: "THEN", text: "0.98" },
+      { type: "field_input", name: "ELSE", text: "0.08" },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: 268,
+    tooltip: "지정한 시행 횟수와 상태 변수 값이 모두 맞을 때 확률을 바꿉니다.",
+  },
+  {
     type: "transition_set",
     message0: "%1가 %2 %3를 %4 %5",
     args0: [
@@ -108,6 +124,25 @@ Blockly.common.defineBlocksWithJsonArray([
     previousStatement: null,
     nextStatement: null,
     colour: 155,
+  },
+  {
+    type: "transition_or_set",
+    message0: "%1 또는 %2가 나오면 %3를 %4 %5",
+    args0: [
+      { type: "field_input", name: "ENTITY_LEFT", text: "star6" },
+      { type: "field_input", name: "ENTITY_RIGHT", text: "star5" },
+      { type: "field_input", name: "VAR", text: "highSeen" },
+      {
+        type: "field_dropdown",
+        name: "SET_MODE",
+        options: [["대입", "literal"], ["현재값 +", "add"]],
+      },
+      { type: "field_input", name: "VALUE", text: "1" },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: 155,
+    tooltip: "두 결과 중 하나가 나오면 상태 변수를 갱신합니다.",
   },
   {
     type: "first_hit_condition",
@@ -153,8 +188,24 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
         { kind: "block", type: "accumulator_variable" },
       ],
     },
-    { kind: "category", name: "확률 규칙", colour: "#7359c7", contents: [{ kind: "block", type: "soft_pity_rule" }] },
-    { kind: "category", name: "결과 변화", colour: "#3d9b79", contents: [{ kind: "block", type: "transition_set" }] },
+    {
+      kind: "category",
+      name: "확률 규칙",
+      colour: "#7359c7",
+      contents: [
+        { kind: "block", type: "soft_pity_rule" },
+        { kind: "block", type: "trial_state_prob_rule" },
+      ],
+    },
+    {
+      kind: "category",
+      name: "결과 변화",
+      colour: "#3d9b79",
+      contents: [
+        { kind: "block", type: "transition_set" },
+        { kind: "block", type: "transition_or_set" },
+      ],
+    },
     { kind: "category", name: "시행 이벤트", colour: "#c88a3a", contents: [{ kind: "block", type: "grant_trigger" }] },
     { kind: "category", name: "조건", colour: "#b69837", contents: [{ kind: "block", type: "first_hit_condition" }] },
   ],
@@ -190,9 +241,25 @@ interface ProbRuleBlockData {
   step: string;
 }
 
+interface TrialStateProbRuleBlockData {
+  target: string;
+  trial: string;
+  variable: string;
+  state: string;
+  then: string;
+  base: string;
+}
+
 interface TransitionBlockData {
   entity: string;
   predicate: "leafOf" | "notLeafOf";
+  variable: string;
+  mode: "literal" | "add";
+  value: string;
+}
+
+interface TransitionOrBlockData {
+  entities: [string, string];
   variable: string;
   mode: "literal" | "add";
   value: string;
@@ -278,6 +345,32 @@ export function workspaceToIr(workspace: Blockly.Workspace, previous: ModelIr): 
     };
   }), preserved.stateVars);
   const probRules = mergePreserved(chain(root.getInputTargetBlock("PROB_RULES")).map((block) => {
+    if (block.type === "trial_state_prob_rule") {
+      return {
+        target: block.getFieldValue("TARGET"),
+        expr: {
+          if: {
+            and: [
+              {
+                eq: [
+                  { trial: true },
+                  { lit: String(block.getFieldValue("TRIAL")) },
+                ],
+              },
+              {
+                eq: [
+                  { var: block.getFieldValue("VAR") },
+                  { lit: String(block.getFieldValue("STATE")) },
+                ],
+              },
+            ],
+          },
+          then: { lit: String(block.getFieldValue("THEN")) },
+          else: { lit: String(block.getFieldValue("ELSE")) },
+        },
+        blockId: block.id,
+      };
+    }
     const target = block.getFieldValue("TARGET");
     const variable = block.getFieldValue("VAR");
     const threshold = String(block.getFieldValue("THRESHOLD"));
@@ -297,18 +390,31 @@ export function workspaceToIr(workspace: Blockly.Workspace, previous: ModelIr): 
     };
   }), preserved.probRules);
   const transitions = mergePreserved(chain(root.getInputTargetBlock("TRANSITIONS")).map((block) => {
-    const entity = block.getFieldValue("ENTITY");
     const variable = block.getFieldValue("VAR");
     const value = String(block.getFieldValue("VALUE"));
+    const set = {
+      [variable]: block.getFieldValue("SET_MODE") === "add"
+        ? { add: [{ var: variable }, { lit: value }] }
+        : { lit: value },
+    };
+    if (block.type === "transition_or_set") {
+      return {
+        when: {
+          or: [
+            { leafOf: block.getFieldValue("ENTITY_LEFT") },
+            { leafOf: block.getFieldValue("ENTITY_RIGHT") },
+          ],
+        },
+        set,
+        blockId: block.id,
+      };
+    }
+    const entity = block.getFieldValue("ENTITY");
     return {
       when: block.getFieldValue("PREDICATE") === "notLeafOf"
         ? { not: { leafOf: entity } }
         : { leafOf: entity },
-      set: {
-        [variable]: block.getFieldValue("SET_MODE") === "add"
-          ? { add: [{ var: variable }, { lit: value }] }
-          : { lit: value },
-      },
+      set,
       blockId: block.id,
     };
   }), preserved.transitions);
@@ -444,6 +550,38 @@ function probRuleBlockData(rule: unknown): ProbRuleBlockData | undefined {
   return { target, variable, threshold, base, mode: "ramp", then: base, step };
 }
 
+function trialStateProbRuleBlockData(rule: unknown): TrialStateProbRuleBlockData | undefined {
+  if (!rule || typeof rule !== "object") return undefined;
+  const record = rule as Record<string, unknown>;
+  const target = typeof record.target === "string" ? record.target : undefined;
+  const expr = record.expr as Record<string, unknown> | undefined;
+  const condition = expr?.if as Record<string, unknown> | undefined;
+  const and = condition?.and;
+  if (!target || !Array.isArray(and) || and.length !== 2) return undefined;
+
+  const trialCondition = and[0] as Record<string, unknown> | undefined;
+  const trialEq = trialCondition?.eq;
+  const stateCondition = and[1] as Record<string, unknown> | undefined;
+  const stateEq = stateCondition?.eq;
+  if (!Array.isArray(trialEq) || trialEq.length !== 2
+    || !Array.isArray(stateEq) || stateEq.length !== 2) return undefined;
+
+  const trialOperand = trialEq[0] as Record<string, unknown> | undefined;
+  const trial = literalValue(trialEq[1]);
+  const stateOperand = stateEq[0] as Record<string, unknown> | undefined;
+  const variable = stateOperand?.var;
+  const state = literalValue(stateEq[1]);
+  const then = literalValue(expr?.then);
+  const base = literalValue(expr?.else);
+  if (trialOperand?.trial !== true
+    || trial === undefined
+    || typeof variable !== "string"
+    || state === undefined
+    || then === undefined
+    || base === undefined) return undefined;
+  return { target, trial, variable, state, then, base };
+}
+
 function transitionBlockData(transition: unknown): TransitionBlockData | undefined {
   if (!transition || typeof transition !== "object") return undefined;
   const record = transition as Record<string, unknown>;
@@ -472,6 +610,50 @@ function transitionBlockData(transition: unknown): TransitionBlockData | undefin
   return amount === undefined
     ? undefined
     : { entity, predicate, variable, mode: "add", value: amount };
+}
+
+function transitionOrBlockData(transition: unknown): TransitionOrBlockData | undefined {
+  if (!transition || typeof transition !== "object") return undefined;
+  const record = transition as Record<string, unknown>;
+  const when = record.when as Record<string, unknown> | undefined;
+  const or = when?.or;
+  if (!Array.isArray(or) || or.length !== 2) return undefined;
+  const left = or[0] as Record<string, unknown> | undefined;
+  const right = or[1] as Record<string, unknown> | undefined;
+  const leftEntity = left?.leafOf;
+  const rightEntity = right?.leafOf;
+  const set = record.set as Record<string, unknown> | undefined;
+  const variables = set ? Object.keys(set) : [];
+  if (typeof leftEntity !== "string"
+    || typeof rightEntity !== "string"
+    || variables.length !== 1) return undefined;
+
+  const variable = variables[0];
+  const expression = set![variable];
+  const literal = literalValue(expression);
+  if (literal !== undefined) {
+    return {
+      entities: [leftEntity, rightEntity],
+      variable,
+      mode: "literal",
+      value: literal,
+    };
+  }
+  const add = expression && typeof expression === "object"
+    ? (expression as Record<string, unknown>).add : undefined;
+  if (!Array.isArray(add) || add.length !== 2) return undefined;
+  const isSelf = (value: unknown) => Boolean(value && typeof value === "object"
+    && (value as Record<string, unknown>).var === variable);
+  const amount = isSelf(add[0]) ? literalValue(add[1])
+    : isSelf(add[1]) ? literalValue(add[0]) : undefined;
+  return amount === undefined
+    ? undefined
+    : {
+        entities: [leftEntity, rightEntity],
+        variable,
+        mode: "add",
+        value: amount,
+      };
 }
 
 function triggerBlockData(trigger: unknown): TriggerBlockData | undefined {
@@ -555,36 +737,57 @@ export function loadIr(workspace: Blockly.Workspace, ir: ModelIr): UnsupportedBl
       return [block];
     }));
     append(root.getInput("PROB_RULES"), ir.probRules.flatMap((rule, index) => {
-      const data = probRuleBlockData(rule);
-      if (!data) {
-        preserved.probRules.push({ index, value: structuredClone(rule) });
-        unsupported.push({ path: `probRules[${index}]`, description: `확률 규칙 ${index + 1}의 일반 표현식` });
-        return [];
+      const softPity = probRuleBlockData(rule);
+      if (softPity) {
+        const block = createBlock(workspace, "soft_pity_rule");
+        block.setFieldValue(softPity.target, "TARGET");
+        block.setFieldValue(softPity.variable, "VAR");
+        block.setFieldValue(Number(softPity.threshold), "THRESHOLD");
+        block.setFieldValue(softPity.mode, "MODE");
+        block.setFieldValue(softPity.then, "THEN");
+        block.setFieldValue(softPity.base, "BASE");
+        block.setFieldValue(softPity.step, "STEP");
+        return [block];
       }
-      const block = createBlock(workspace, "soft_pity_rule");
-      block.setFieldValue(data.target, "TARGET");
-      block.setFieldValue(data.variable, "VAR");
-      block.setFieldValue(Number(data.threshold), "THRESHOLD");
-      block.setFieldValue(data.mode, "MODE");
-      block.setFieldValue(data.then, "THEN");
-      block.setFieldValue(data.base, "BASE");
-      block.setFieldValue(data.step, "STEP");
-      return [block];
+      const trialState = trialStateProbRuleBlockData(rule);
+      if (trialState) {
+        const block = createBlock(workspace, "trial_state_prob_rule");
+        block.setFieldValue(trialState.target, "TARGET");
+        block.setFieldValue(Number(trialState.trial), "TRIAL");
+        block.setFieldValue(trialState.variable, "VAR");
+        block.setFieldValue(trialState.state, "STATE");
+        block.setFieldValue(trialState.then, "THEN");
+        block.setFieldValue(trialState.base, "ELSE");
+        return [block];
+      }
+      preserved.probRules.push({ index, value: structuredClone(rule) });
+      unsupported.push({ path: `probRules[${index}]`, description: `확률 규칙 ${index + 1}의 일반 표현식` });
+      return [];
     }));
     append(root.getInput("TRANSITIONS"), ir.transitions.flatMap((transition, index) => {
       const data = transitionBlockData(transition);
-      if (!data) {
-        preserved.transitions.push({ index, value: structuredClone(transition) });
-        unsupported.push({ path: `transitions[${index}]`, description: `결과 변화 ${index + 1}의 일반 술어 또는 표현식` });
-        return [];
+      if (data) {
+        const block = createBlock(workspace, "transition_set");
+        block.setFieldValue(data.entity, "ENTITY");
+        block.setFieldValue(data.predicate, "PREDICATE");
+        block.setFieldValue(data.variable, "VAR");
+        block.setFieldValue(data.mode, "SET_MODE");
+        block.setFieldValue(data.value, "VALUE");
+        return [block];
       }
-      const block = createBlock(workspace, "transition_set");
-      block.setFieldValue(data.entity, "ENTITY");
-      block.setFieldValue(data.predicate, "PREDICATE");
-      block.setFieldValue(data.variable, "VAR");
-      block.setFieldValue(data.mode, "SET_MODE");
-      block.setFieldValue(data.value, "VALUE");
-      return [block];
+      const orData = transitionOrBlockData(transition);
+      if (orData) {
+        const block = createBlock(workspace, "transition_or_set");
+        block.setFieldValue(orData.entities[0], "ENTITY_LEFT");
+        block.setFieldValue(orData.entities[1], "ENTITY_RIGHT");
+        block.setFieldValue(orData.variable, "VAR");
+        block.setFieldValue(orData.mode, "SET_MODE");
+        block.setFieldValue(orData.value, "VALUE");
+        return [block];
+      }
+      preserved.transitions.push({ index, value: structuredClone(transition) });
+      unsupported.push({ path: `transitions[${index}]`, description: `결과 변화 ${index + 1}의 일반 술어 또는 표현식` });
+      return [];
     }));
     append(root.getInput("TRIGGERS"), ir.triggers.flatMap((trigger, index) => {
       const data = triggerBlockData(trigger);
