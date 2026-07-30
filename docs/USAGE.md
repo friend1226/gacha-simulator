@@ -165,8 +165,36 @@ WASM과 `dist`는 빌드 산출물이므로 git에 커밋하지 않는다. 캐�
 3. GitHub Actions secrets에 `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID` 등록
 
 시크릿 등록 후 `main`에 push하거나 GitHub Actions의 **Deploy to Netlify**에서
-수동 실행한다. Netlify가 저장소를 직접 빌드할 필요는 없으며, 실수로 연결해도
-`netlify.toml`의 ignore 설정이 자체 빌드를 중단한다.
+수동 실행한다.
+
+문서만 바뀐 push에서는 워크플로가 실행되지 않는다. CI와 Deploy 모두
+`paths-ignore: ["docs/**", "**/*.md"]`를 쓰기 때문이다. 문서 변경은 배포 산출물에
+들어가지 않으므로 이때 배포가 돌지 않는 것이 정상이고, 라이브 사이트는 직전 코드
+커밋의 빌드를 계속 서비스한다.
+
+#### 저장소를 Netlify에 직접 연동하지 않는다
+
+이 사이트는 **빌드 명령이 없는 수동 배포 사이트**여야 한다. GitHub Actions가 이미
+빌드한 `ui/dist`만 올리므로 Netlify 자체 빌드는 필요 없다. 저장소를 Netlify에
+연동하면 Netlify가 스스로 빌드를 시도하다가 실패한다. 증상은 "프레임워크나 빌드
+단계를 감지할 수 없다"는 오류다.
+
+`netlify.toml`의 `ignore = "exit 0"`이 그 빌드를 취소하도록 넣어 뒀지만, **Netlify가
+루트 `netlify.toml`을 읽을 때만** 동작한다. 사이트 설정에 base directory가 잡혀
+있으면 Netlify는 `<base>/netlify.toml`을 찾고, 이 저장소에는 그 파일이 없어서 설정이
+통째로 무시된다. 즉 ignore 설정만 믿으면 안 된다.
+
+연동돼 있다면 Netlify 사이트 설정의 **Build & deploy → Continuous deployment**에서
+저장소 연결을 해제한다. 연결을 유지해야 한다면 base directory를 비워 루트
+`netlify.toml`이 읽히게 한다.
+
+**`publish = "."`로 바꾸지 않는다.** 루트에는 `index.html`이 없고(`ui/index.html`에
+있다) Rust 소스와 문서가 그대로 공개된다. 자체 빌드 실패의 해결책으로 이 설정이
+제안되는 경우가 있는데 오답이다.
+
+Netlify 자체 빌드가 실패해도 라이브 사이트는 영향받지 않는다. Netlify는 마지막 성공
+배포를 유지하고, GitHub Actions는 `netlify deploy --dir=ui/dist --prod`로 이미 빌드된
+결과를 직접 올리므로 사이트의 빌드 설정과 무관하게 동작한다.
 
 ### 3.5 UI 사용법
 
@@ -226,4 +254,6 @@ WASM과 `dist`는 빌드 산출물이므로 git에 커밋하지 않는다. 캐�
 | `E012: probability precompute table requires ... entries` | 확률표 사전계산이 1천만 엔트리 초과. 메시지의 `control`·`trials`·`leaves` 축으로 원인을 알 수 있다 | 확률식의 제어 변수 참조를 줄여 도달 제어 상태를 줄이거나, `maxTrials`·리프 수를 줄인다. 상한 초과로 탐색이 중단된 경우 개수는 `>=` 하한으로 표시된다 |
 | UI 검증 패널에 `W004` 경고 | 추정 상태 수가 기본 DP 레이어 상한 1,000,000을 넘을 수 있음 (계산은 가능) | 그대로 실행해도 되며, `E011`로 중단되면 위 항목을 따른다 |
 | 웹 UI가 오류 복구 화면을 표시 | 렌더 예외 또는 저장된 모델이 현재 스키마와 맞지 않음 | 새로고침을 먼저 시도하고, 반복되면 "저장된 모델 지우고 다시 시작"을 쓴다 |
+| Netlify 대시보드에 "프레임워크·빌드 단계를 감지할 수 없다"는 빌드 실패 | 저장소가 Netlify에 연동돼 Netlify 자체 빌드가 돌았다. 배포는 GitHub Actions가 담당한다 | §3.4의 "저장소를 Netlify에 직접 연동하지 않는다" 참고. 라이브 사이트는 영향받지 않으므로 재배포는 필요 없다 |
+| `main`에 push했는데 배포 워크플로가 실행되지 않음 | 문서만 바뀌었고 두 워크플로 모두 `paths-ignore`로 `docs/**`·`**/*.md`를 제외한다 | 정상이다. 코드가 그대로이므로 재배포할 이유가 없다. 굳이 돌리려면 **Deploy to Netlify**를 `workflow_dispatch`로 실행한다 |
 | `cargo test --workspace`가 Linux/CI에서 `gacha-tauri` 단계에서 실패 | Tauri Linux 백엔드가 GTK/WebKit 시스템 라이브러리 요구 (현재 미설치) | 로컬에서는 `--exclude gacha-tauri`로 우회 가능. CI는 이미 이렇게 설정됨 (`docs/STATUS.md` 참고) |
