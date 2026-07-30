@@ -761,3 +761,31 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   콘솔 오류는 0건이었다. 375px에서 `innerWidth=375`,
   `clientWidth=360`, `scrollWidth=360`, `body.scrollWidth=360`으로
   가로 넘침이 없었다.
+
+## 2026-07-30 DP 도달 상태 회귀 수정
+
+- 시행 비의존 전이가 수렴한 뒤 다음 트리거 시행으로 점프할 때 프런티어만
+  유지해, 자기 루프가 없는 순환 전이의 일부 상태가 트리거 입력에서 빠지는
+  회귀를 수정했다. 점프 시 누적 도달 집합 전체를 트리거 입력 상위집합으로
+  전개해 확률표가 런타임 제어 상태를 빠뜨리지 않는다.
+- 기존 프리셋에는 `transitions`와 `triggers`를 함께 쓰는 모델이 없었다.
+  simple-pity와 Arknights는 전이만 있고, Blue Archive는 트리거만 있으며
+  제어 변수가 없다. 기존 도달 회귀 테스트도 시행이 2회이거나 전이가 없어
+  수렴 뒤 트리거 점프 분기를 통과하지 않았다.
+- parity 2주기와 6번째 시행 트리거를 결합한 회귀 테스트를 추가했다.
+  수정 한 줄을 제거한 변이에서는 `controlStates=2`로 컴파일된 뒤
+  `compile.rs:222`의 `runtime control state must be present in the probability
+  table` 패닉으로 실패했다. 수정 후 `controlStates=4`, 확률표 키
+  `[0, 1, 2, 3]`이며 DP는 `P(a=0)=0.0263671875`,
+  `P(a=7)=0.0009765625`로 완료했다.
+- 도달 탐색이 확률표 하드 상한에서 조기 중단된 `E012`는 발견된 제어 상태와
+  엔트리 수를 `at least`, `control>=...`, `entries>=...`로 표시한다.
+  끝까지 계산한 `W010`/`E012`는 기존처럼 정확한 개수를 표시한다.
+- `cargo test --workspace --exclude gacha-tauri`는 core 62/62를 포함해
+  전부 통과했다. Blue Archive, Arknights, simple-pity의 `resultSha256`
+  3개와 Arknights 불변식이 그대로이며, `npx tsc --noEmit`, UI 37/37
+  테스트와 1,606개 모듈의 프로덕션 빌드도 통과했다.
+- 현재 코어로 WASM을 다시 빌드한 프로덕션 프리뷰에서 같은 전이·트리거와
+  동등한 `probRules` 확률식을 사용한 모델은 `controlStates=4`, 8개 결과 셀,
+  peak 8 상태로 3ms에 완료됐다. 양끝 확률은 CLI와 같고 브라우저 콘솔 오류는
+  0건이었다.

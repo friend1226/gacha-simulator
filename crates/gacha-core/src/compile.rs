@@ -779,6 +779,7 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
                     discovered_controls as u64,
                     table_trials,
                     leaves.len(),
+                    true,
                     &mut diagnostics,
                 );
                 return Err(CompileError { diagnostics });
@@ -792,6 +793,7 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         probability_table_controls,
         table_trials,
         leaves.len(),
+        false,
         &mut diagnostics,
     ) {
         return Err(CompileError { diagnostics });
@@ -1894,6 +1896,7 @@ fn reachable_control_indices(
                 break;
             };
             completed_trials = next_trigger_trial - 1;
+            layer = reachable.clone();
         } else {
             completed_trials = next_completed_trials;
         }
@@ -1986,29 +1989,56 @@ fn push_probability_table_size_diagnostic(
     control_count: u64,
     trial_count: u32,
     leaf_count: usize,
+    is_lower_bound: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
     let entry_count = u128::from(control_count)
         .saturating_mul(u128::from(trial_count))
         .saturating_mul(leaf_count as u128);
-    let axes = format!(
-        "control={control_count}, trials={trial_count}, leaves={leaf_count}, entries={entry_count}"
-    );
+    let axes = if is_lower_bound {
+        format!(
+            "control>={control_count}, trials={trial_count}, leaves={leaf_count}, entries>={entry_count}"
+        )
+    } else {
+        format!(
+            "control={control_count}, trials={trial_count}, leaves={leaf_count}, entries={entry_count}"
+        )
+    };
     if entry_count > PROBABILITY_TABLE_MAX_ENTRIES {
+        let requirement = if is_lower_bound {
+            format!("requires at least {entry_count} entries")
+        } else {
+            format!("requires {entry_count} entries")
+        };
+        let axes_label = if is_lower_bound {
+            "lower-bound axes"
+        } else {
+            "axes"
+        };
         diagnostics.push(error(
             "E012",
             format!(
-                "probability precompute table requires {entry_count} entries, exceeding hard limit {PROBABILITY_TABLE_MAX_ENTRIES}; axes: {axes}; reduce reachable control states, maxTrials, or probability leaves"
+                "probability precompute table {requirement}, exceeding hard limit {PROBABILITY_TABLE_MAX_ENTRIES}; {axes_label}: {axes}; reduce reachable control states, maxTrials, or probability leaves"
             ),
             None,
         ));
         return false;
     }
     if entry_count >= PROBABILITY_TABLE_WARNING_ENTRIES {
+        let requirement = if is_lower_bound {
+            format!("requires at least {entry_count} entries")
+        } else {
+            format!("requires {entry_count} entries")
+        };
+        let axes_label = if is_lower_bound {
+            "lower-bound axes"
+        } else {
+            "axes"
+        };
         diagnostics.push(warning(
             "W010",
             format!(
-                "probability precompute table requires {entry_count} entries; axes: {axes}; reduce reachable control states, maxTrials, or probability leaves"
+                "probability precompute table {requirement}; {axes_label}: {axes}; reduce reachable control states, maxTrials, or probability leaves"
             ),
             None,
         ));
@@ -2614,6 +2644,7 @@ mod tests {
             250_000,
             1,
             2,
+            false,
             &mut diagnostics,
         ));
         assert_eq!(diagnostics.len(), 1);
@@ -2625,10 +2656,28 @@ mod tests {
             5_000_001,
             1,
             2,
+            false,
             &mut diagnostics,
         ));
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E012");
         assert!(diagnostics[0].message.contains("entries=10000002"));
+
+        diagnostics.clear();
+        assert!(!push_probability_table_size_diagnostic(
+            5_000_001,
+            1,
+            2,
+            true,
+            &mut diagnostics,
+        ));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E012");
+        assert!(diagnostics[0]
+            .message
+            .contains("requires at least 10000002 entries"));
+        assert!(diagnostics[0]
+            .message
+            .contains("lower-bound axes: control>=5000001"));
     }
 }

@@ -381,3 +381,90 @@ fn reachable_controls_include_trigger_assignments() {
     assert_eq!(result.trials, 2);
     assert_eq!(result.joint.len(), 3);
 }
+
+#[test]
+fn cyclic_transition_frontier_keeps_late_trigger_states_reachable() {
+    let ir: ModelIr = serde_json::from_value(json!({
+        "irVersion": 2,
+        "name": "parity cycle with late trigger",
+        "entities": [
+            {
+                "id": "a",
+                "name": "a",
+                "prob": {
+                    "if": {"eq": [{"var": "parity"}, {"lit": "0"}]},
+                    "then": {"lit": "0.5"},
+                    "else": {"lit": "0.25"}
+                }
+            },
+            {
+                "id": "b",
+                "name": "b",
+                "prob": {
+                    "if": {"eq": [{"var": "parity"}, {"lit": "0"}]},
+                    "then": {"lit": "0.5"},
+                    "else": {"lit": "0.75"}
+                }
+            }
+        ],
+        "nestingPolicy": "error",
+        "stateVars": [
+            {"id": "parity", "init": 0, "max": 1, "role": "control"},
+            {"id": "flag", "init": 0, "max": 1, "role": "control"}
+        ],
+        "probRules": [],
+        "transitions": [{
+            "when": {
+                "or": [
+                    {"leafIs": "a"},
+                    {"leafIs": "b"},
+                    {"leafIs": "__other__"}
+                ]
+            },
+            "set": {
+                "parity": {"sub": [{"lit": "1"}, {"var": "parity"}]}
+            }
+        }],
+        "triggers": [{
+            "at": {"trialCount": 6},
+            "set": {
+                "flag": {"sub": [{"lit": "1"}, {"var": "parity"}]}
+            }
+        }],
+        "run": {
+            "maxTrials": 7,
+            "trackJoint": ["a"],
+            "numeric": "f64",
+            "trialSeries": "none"
+        }
+    }))
+    .expect("cyclic trigger regression IR must deserialize");
+
+    let model = compile(&ir).expect("cyclic trigger model must compile");
+    let result = run_dp(&model, DpOptions::default(), |_, _| true)
+        .expect("late-trigger control states must be present in the probability table");
+    assert_eq!(model.analysis.control_states, 4);
+    assert_eq!(
+        model
+            .prob_table
+            .control_entry_indices
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2, 3],
+    );
+
+    let DpRunResult::Approximate(result) = result else {
+        panic!("f64 model must use the approximate DP result");
+    };
+    let probability = |count| {
+        result
+            .joint
+            .iter()
+            .find(|cell| cell.counts == [count])
+            .map(|cell| cell.probability)
+            .unwrap_or_default()
+    };
+    assert!((probability(0) - 0.026_367_187_5).abs() <= 1e-12);
+    assert!((probability(7) - 0.000_976_562_5).abs() <= 1e-12);
+}
