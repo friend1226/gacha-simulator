@@ -1,4 +1,18 @@
-# Gacha simulator implementation rules
+# Gacha simulator agent guide
+
+## Sources of truth
+
+- Read `docs/DESIGN.md` before changing architecture or engine semantics. Its decisions
+  are authoritative.
+- Use `docs/DESIGN.md` §13 for known implementation differences, `docs/STATUS.md` for
+  completed validation evidence, and `docs/USAGE.md` for supported build and runtime
+  workflows.
+- When implementation and specification intentionally diverge, update §13 together
+  with the code. Do not leave the reason only in comments or a temporary plan.
+- Keep this file and `CLAUDE.md` synchronized when shared implementation or workflow
+  rules change.
+
+## Absolute implementation rules
 
 The numbered list below contains the 9 absolute rules from `CLAUDE.md`'s "절대 규칙",
 mirrored 1:1 in English. Keep that numbered list in sync with `CLAUDE.md`. Source spec:
@@ -25,6 +39,40 @@ mirrored 1:1 in English. Keep that numbered list in sync with `CLAUDE.md`. Sourc
    keep those tests passing whenever performance work is performed. Correctness
    validation comes first.
 
+## Validation baseline
+
+- Run Rust validation with `cargo test --workspace --exclude gacha-tauri`. The Tauri
+  crate requires platform GUI libraries that are not present in Linux CI.
+- Run UI validation from `ui/` with `npx tsc --noEmit` and `npm test`.
+- The current regression line is 62 Rust core tests and 37 UI tests. Preserve all three
+  preset `resultSha256` goldens.
+- None of the three presets combines `transitions` and `triggers`. When changing
+  reachable-control analysis, explicitly run
+  `cyclic_transition_frontier_keeps_late_trigger_states_reachable` in
+  `crates/gacha-core/tests/core_diagnostics.rs`; preset goldens alone do not cover that
+  path.
+- After changing `gacha-core` or `gacha-wasm` behavior used by the web app, rebuild the
+  package with
+  `wasm-pack build crates/gacha-wasm --target web --out-dir ../../ui/public/wasm`, then
+  run `npm run build` and verify calculations through `npm run preview`.
+  `npm run dev` cannot execute the WASM worker path because Vite does not allow the
+  required dynamic import from `public/`.
+- `ui/public/wasm` and `ui/dist` are generated build artifacts and must not be
+  committed.
+
+## Cross-file change rules
+
+- Documentation prose is Korean; code identifiers and commit messages are English.
+- A Model IR schema change must increment `irVersion` and update `presets/` and
+  `ui/src/types.ts` together.
+- A new diagnostic code must be added to the table in `docs/DESIGN.md` §3.4 and to the
+  UI diagnostic labels/help coverage.
+- Keep validation thresholds synchronized between `ui/src/validator.ts`,
+  `crates/gacha-core/src/compile.rs`, and `crates/gacha-core/src/engine_dp.rs`.
+- Record material validation results in `docs/STATUS.md`. Temporary plan and
+  measurement files must not be committed.
+- Game-specific mechanics belong in `presets/`, not hard-coded engine branches.
+
 ## Branch and merge process
 
 - `main` is the production deployment branch. Do not commit directly to it.
@@ -32,3 +80,6 @@ mirrored 1:1 in English. Keep that numbered list in sync with `CLAUDE.md`. Sourc
 - Only the owner decides when to merge `dev` into `main`; agents must not do this on
   their own.
 - Automatic production deployment runs only on pushes to `main`.
+- Items marked as awaiting owner judgment in `CLAUDE.md` must not be implemented
+  without explicit approval. In particular, a lazy probability table conflicts with
+  absolute rule 5 and requires a separate design decision.
