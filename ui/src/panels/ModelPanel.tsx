@@ -2,6 +2,7 @@ import { Activity, Braces, CircleAlert, CircleCheck, X } from "lucide-react";
 import type { RefObject } from "react";
 import type { UnsupportedBlockItem } from "../blockly";
 import type { Diagnostic, ModelIr, ValidationView } from "../types";
+import { DP_ESTIMATED_STATE_HARD_LIMIT } from "../validator";
 
 export function ModelPanel({
   blockHost,
@@ -88,7 +89,11 @@ export function ModelPanel({
         </div>
         <div className="analysis">
           <h3>분석</h3>
-          <Metric label="정확 계산" value={validation.estimatedStates <= 50_000_000 ? "가능" : "제한"} ok />
+          <Metric
+            label="정확 계산"
+            value={validation.estimatedStates <= DP_ESTIMATED_STATE_HARD_LIMIT ? "가능" : "제한"}
+            ok={validation.estimatedStates <= DP_ESTIMATED_STATE_HARD_LIMIT}
+          />
           <Metric label="가챠 규칙 상태" value={validation.controlStates.toLocaleString()} />
           <Metric label="계산 규모" value={`~${validation.estimatedStates.toLocaleString()}`} />
           <Metric label="수치 모드" value={model.run.numeric === "scaled" ? "표준" : model.run.numeric} />

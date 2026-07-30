@@ -26,6 +26,8 @@ enum Command {
         model: PathBuf,
         #[arg(long)]
         no_prune: bool,
+        #[arg(long)]
+        max_layer_states: Option<usize>,
     },
     Exact {
         model: PathBuf,
@@ -50,6 +52,8 @@ enum Command {
         confirm_full: bool,
         #[arg(long)]
         no_prune: bool,
+        #[arg(long)]
+        max_layer_states: Option<usize>,
     },
 }
 
@@ -86,13 +90,15 @@ fn main() -> Result<()> {
                 }))?
             );
         }
-        Command::Dp { model, no_prune } => {
+        Command::Dp {
+            model,
+            no_prune,
+            max_layer_states,
+        } => {
             let compiled = load(&model)?;
             let result = run_dp(
                 &compiled,
-                DpOptions {
-                    prune_log10: (!no_prune).then_some(-18.0),
-                },
+                dp_options(no_prune, max_layer_states),
                 |done, total| {
                     if done == total || done % 100 == 0 {
                         eprintln!("DP {done}/{total}");
@@ -144,13 +150,12 @@ fn main() -> Result<()> {
             pin,
             confirm_full,
             no_prune,
+            max_layer_states,
         } => {
             let compiled = load(&model)?;
             let (result, manifest) = run_dp_with_snapshots(
                 &compiled,
-                DpOptions {
-                    prune_log10: (!no_prune).then_some(-18.0),
-                },
+                dp_options(no_prune, max_layer_states),
                 SnapshotOptions {
                     output_dir: output,
                     policy: policy.into(),
@@ -174,6 +179,17 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn dp_options(no_prune: bool, max_layer_states: Option<usize>) -> DpOptions {
+    let mut options = DpOptions {
+        prune_log10: (!no_prune).then_some(-18.0),
+        ..Default::default()
+    };
+    if let Some(limit) = max_layer_states {
+        options.max_layer_states = Some(limit);
+    }
+    options
 }
 
 fn load(path: &PathBuf) -> Result<gacha_core::CompiledModel> {

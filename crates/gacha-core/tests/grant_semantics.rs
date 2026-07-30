@@ -57,7 +57,16 @@ fn grant_model(
 }
 
 fn run_scaled(model: &gacha_core::CompiledModel) -> DpResult {
-    match run_dp(model, DpOptions { prune_log10: None }, |_, _| true).expect("scaled DP must run") {
+    match run_dp(
+        model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .expect("scaled DP must run")
+    {
         DpRunResult::Approximate(result) => result,
         DpRunResult::Exact(_) => panic!("scaled model unexpectedly used exact DP"),
     }

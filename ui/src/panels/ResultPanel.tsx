@@ -185,7 +185,7 @@ function ResultView({ result, axes, settings }: { result: EngineResult; axes: Ax
     : selected ? table.lookup.get(pivotKey(selected.row, selected.col))?.display : undefined;
   return (
     <article className="result-card">
-      <header><div><h2>{title}</h2><p>{result.elapsedMs}ms · {result.numeric}{result.runs ? ` · ${result.runs.toLocaleString()}회 · seed ${result.seed}` : ""}{result.modelHash ? ` · ${result.modelHash.slice(0, 12)}` : ""}</p></div>
+      <header><div><h2>{title}</h2><p>{result.elapsedMs}ms · {result.numeric}{result.peakStates !== undefined ? ` · peak ${result.peakStates.toLocaleString()} 상태` : ""}{result.runs ? ` · ${result.runs.toLocaleString()}회 · seed ${result.seed}` : ""}{result.modelHash ? ` · ${result.modelHash.slice(0, 12)}` : ""}</p></div>
         <div className="export-actions"><button onClick={() => navigator.clipboard.writeText(toCsv(table))}><Copy size={14} /> CSV 복사</button><button onClick={() => download("gacha-pivot.csv", toCsv(table), "text/csv")}><Download size={14} /> CSV</button><button onClick={() => download("gacha-result.json", JSON.stringify(result, null, 2), "application/json")}><Download size={14} /> JSON</button></div>
       </header>
       {(result.prunedMass ?? 0) > 0 && <p className="warning">표시되지 않은 프루닝 확률 질량: {formatProbability(result.prunedMass!, "scientific")}</p>}

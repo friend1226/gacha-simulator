@@ -22,8 +22,15 @@ fn first_hit_result(successes: u32, max_trials: u32, probability: &str) -> First
     }))
     .expect("analytic distribution IR must deserialize");
     let model = compile(&ir).expect("analytic distribution IR must compile");
-    let result =
-        run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).expect("scaled DP must run");
+    let result = run_dp(
+        &model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .expect("scaled DP must run");
     let DpRunResult::Approximate(result) = result else {
         panic!("scaled model unexpectedly used exact DP");
     };

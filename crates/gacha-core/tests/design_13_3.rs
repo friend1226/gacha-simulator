@@ -47,8 +47,15 @@ fn compile_nested_model(
 }
 
 fn run_scaled(model: &gacha_core::CompiledModel) -> DpResult {
-    let result =
-        run_dp(model, DpOptions { prune_log10: None }, |_, _| true).expect("scaled DP must run");
+    let result = run_dp(
+        model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .expect("scaled DP must run");
 
     match result {
         DpRunResult::Approximate(result) => result,

@@ -66,8 +66,15 @@ fn canonical_result(result: &DpResult) -> serde_json::Value {
 fn assert_scaled_golden(preset_source: &str, golden_source: &str) {
     let ir: ModelIr = serde_json::from_str(preset_source).expect("preset must deserialize");
     let model = compile(&ir).expect("preset must compile");
-    let result =
-        run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).expect("preset DP must run");
+    let result = run_dp(
+        &model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .expect("preset DP must run");
     let DpRunResult::Approximate(result) = result else {
         panic!("golden presets must use approximate DP");
     };

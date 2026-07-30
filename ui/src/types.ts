@@ -64,6 +64,7 @@ export interface EngineResult {
   engine: "DP" | "Exact" | "MC";
   numeric: string;
   trials: number;
+  peakStates?: number;
   runs?: number;
   seed?: number;
   trackedLeafIds: string[];

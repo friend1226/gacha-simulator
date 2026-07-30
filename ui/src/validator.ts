@@ -1,8 +1,10 @@
 import type { Diagnostic, Entity, LeafView, ModelIr, ValidationView } from "./types";
 
-// Keep these thresholds in sync with crates/gacha-core/src/compile.rs.
+// Keep these thresholds in sync with crates/gacha-core/src/compile.rs,
+// especially DP_ESTIMATED_STATE_HARD_LIMIT ↔ DP_ESTIMATED_STATE_LIMIT.
 export const ACCUMULATOR_TABLE_WARNING_ENTRIES = 500_000;
 export const ACCUMULATOR_TABLE_MAX_ENTRIES = 10_000_000;
+export const DP_ESTIMATED_STATE_HARD_LIMIT = 50_000_000;
 
 export function parseExactLiteral(value: string): { numerator: bigint; denominator: bigint } {
   const source = value.trim();
@@ -105,7 +107,13 @@ export function validateLocally(ir: ModelIr): ValidationView {
   }
   const estimatedStates = controlStates * accumulatorStates
     * (ir.run.maxTrials + 1) ** Math.max(0, ir.run.trackJoint.length - 1);
-  if (estimatedStates > 50_000_000) diagnostics.push({ code: "W004", severity: "warning", message: "예상 상태 공간이 DP 권장 한계를 초과합니다" });
+  if (estimatedStates > DP_ESTIMATED_STATE_HARD_LIMIT) {
+    diagnostics.push({
+      code: "W004",
+      severity: "error",
+      message: `예상 상태 공간이 DP 한도 ${DP_ESTIMATED_STATE_HARD_LIMIT.toLocaleString()}개를 초과합니다`,
+    });
+  }
   validateAccumulatorTable(ir, leaves, leafAncestors, controlStates, diagnostics);
   return { diagnostics, leaves, controlStates, estimatedStates, exactAvailable: true };
 }

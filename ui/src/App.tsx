@@ -233,6 +233,7 @@ export function App() {
         engine: execution.engine === "EXACT" ? "Exact" : execution.engine,
         numeric: parsed.numeric ?? (engine === "mc" ? model.run.numeric : "scaled"),
         trials: parsed.trials ?? model.run.maxTrials,
+        peakStates: parsed.peakStates,
         runs: parsed.runs,
         seed: parsed.seed,
         trackedLeafIds: parsed.trackedLeafIds ?? [],
