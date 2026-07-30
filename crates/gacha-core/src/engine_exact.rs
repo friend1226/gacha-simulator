@@ -379,13 +379,14 @@ fn expand_exact_chunk(
     let mut accumulator_clamps = 0u64;
     for (state, numerator) in source {
         let ci = codec.control_index(*state);
+        let probability_ci = model.probability_table_index(ci);
         codec.decode_full_into(
             *state,
             &mut base_control,
             &mut base_accumulators,
             &mut base_counts,
         );
-        for (leaf, weight) in weights[ci][ti].iter().enumerate() {
+        for (leaf, weight) in weights[probability_ci][ti].iter().enumerate() {
             if weight.is_zero() {
                 continue;
             }
@@ -466,7 +467,11 @@ fn expand_exact_packed_chunk(
     let mut accumulator_clamps = 0u64;
     for (state, numerator) in source {
         let control_index = codec.control_index(*state);
-        for (leaf, weight) in weights[control_index][probability_trial].iter().enumerate() {
+        let probability_control_index = model.probability_table_index(control_index);
+        for (leaf, weight) in weights[probability_control_index][probability_trial]
+            .iter()
+            .enumerate()
+        {
             if weight.is_zero() {
                 continue;
             }
