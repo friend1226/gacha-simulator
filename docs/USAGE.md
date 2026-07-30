@@ -70,10 +70,10 @@ cargo run -p gacha-cli -- <명령> <모델.json> [옵션]
 | 명령 | 설명 | 주요 옵션 |
 |---|---|---|
 | `validate <model>` | Model IR을 검증하고 진단·리프 확률표·마르코프 분석 결과를 JSON으로 출력 | — |
-| `dp <model>` | 근사(F64/ScaledF64) 또는 정확(BigInt) 마르코프 DP 실행 — `numeric` 필드에 따라 자동 분기 | `--no-prune` (프루닝 비활성화) |
+| `dp <model>` | 근사(F64/ScaledF64) 또는 정확(BigInt) 마르코프 DP 실행 — `numeric` 필드에 따라 자동 분기 | `--no-prune` (프루닝 비활성화), `--max-layer-states <N>` (기본 1000000) |
 | `exact <model>` | `numeric` 설정과 무관하게 강제로 BigInt 정확 DP 실행 | `--reduce` (레이어 공통분모 약분) |
 | `mc <model>` | 몬테카를로 시뮬레이션 | `--runs <N>` (기본 100000), `--seed <N>` (기본 42) |
-| `snapshot <model> <output>` | DP를 실행하며 레이어를 GCHS 포맷으로 디스크에 저장 | `--policy aggregate\|checkpoint\|full` (기본 `aggregate`), `--pin <layer>` (반복 가능), `--confirm-full`, `--no-prune` |
+| `snapshot <model> <output>` | DP를 실행하며 레이어를 GCHS 포맷으로 디스크에 저장 | `--policy aggregate\|checkpoint\|full` (기본 `aggregate`), `--pin <layer>` (반복 가능), `--confirm-full`, `--no-prune`, `--max-layer-states <N>` |
 
 예시:
 
@@ -88,6 +88,14 @@ cargo run -p gacha-cli -- snapshot presets/blue-archive-pickup.json ./out --poli
 `--policy full`은 절대 규칙(§CLAUDE.md)에 따라 `--confirm-full` 없이는 거부된다 — 용량이
 크므로 (§DESIGN.md §8.3) 먼저 `validate`나 기본 `dp` 실행으로 상태 공간을 확인하고 쓰는
 것을 권장한다.
+
+`--max-layer-states`는 근사 DP 한 레이어의 **실제** 상태 수 상한이다. 초과하면 부분
+결과를 완료로 보고하지 않고 `E011`로 중단한다. `--no-prune`은 이 상한을 해제하지 않으며
+(오히려 상태가 늘어 더 쉽게 걸린다), 의도적으로 큰 계산을 밀어붙일 때만 값을 올린다.
+정확(BigInt) 모드는 이 상한 대상이 아니다.
+
+`dp` 결과의 `peakStates`는 실행 중 관측된 최대 레이어 상태 수다. 상한을 조정하기 전에
+이 값으로 실제 규모를 확인할 수 있다.
 
 빌드된 바이너리로 직접 실행하려면 `cargo build --release -p gacha-cli` 후
 `target/release/gacha-cli.exe <명령> ...`을 쓴다 (`cargo run`보다 매번 빠르다).
@@ -214,4 +222,8 @@ WASM과 `dist`는 빌드 산출물이므로 git에 커밋하지 않는다. 캐�
 | 웹 UI에서 "WASM 패키지가 없습니다" | `ui/public/wasm`에 빌드 산출물이 없음 | §3.1 실행 |
 | WASM을 이미 빌드했는데도 `npm run dev`에서 같은 "WASM 패키지가 없습니다" 메시지 | §3.2의 알려진 Vite 제약. 동적 import 실패를 미배치와 구분하지 못해 같은 문구가 나온다 | §3.3 프로덕션 미리보기 사용 |
 | `gacha snapshot ... --policy full`이 거부됨 | 절대 규칙 — `full`은 명시적 확인 필수 | `--confirm-full` 추가 (용량 먼저 확인 권장) |
+| `E011: approximate DP layer state count ... exceeds limit` | 근사 DP 한 레이어의 실제 상태 수가 기본 상한 1,000,000 초과 | 시행 수·추적 대상을 줄이거나, 규모를 알고 밀어붙일 때만 `--max-layer-states`를 올린다. MC로 바꾸는 것도 방법 |
+| `E012: probability precompute table requires ... entries` | 확률표 사전계산이 1천만 엔트리 초과. 메시지의 `control`·`trials`·`leaves` 축으로 원인을 알 수 있다 | 확률식의 제어 변수 참조를 줄여 도달 제어 상태를 줄이거나, `maxTrials`·리프 수를 줄인다. 상한 초과로 탐색이 중단된 경우 개수는 `>=` 하한으로 표시된다 |
+| UI 검증 패널에 `W004` 경고 | 추정 상태 수가 기본 DP 레이어 상한 1,000,000을 넘을 수 있음 (계산은 가능) | 그대로 실행해도 되며, `E011`로 중단되면 위 항목을 따른다 |
+| 웹 UI가 오류 복구 화면을 표시 | 렌더 예외 또는 저장된 모델이 현재 스키마와 맞지 않음 | 새로고침을 먼저 시도하고, 반복되면 "저장된 모델 지우고 다시 시작"을 쓴다 |
 | `cargo test --workspace`가 Linux/CI에서 `gacha-tauri` 단계에서 실패 | Tauri Linux 백엔드가 GTK/WebKit 시스템 라이브러리 요구 (현재 미설치) | 로컬에서는 `--exclude gacha-tauri`로 우회 가능. CI는 이미 이렇게 설정됨 (`docs/STATUS.md` 참고) |

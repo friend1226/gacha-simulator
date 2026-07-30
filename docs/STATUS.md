@@ -789,3 +789,38 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   동등한 `probRules` 확률식을 사용한 모델은 `controlStates=4`, 8개 결과 셀,
   peak 8 상태로 3ms에 완료됐다. 양끝 확률은 CLI와 같고 브라우저 콘솔 오류는
   0건이었다.
+
+### 리뷰 검증 (Claude)
+
+- 수정 한 줄을 직접 제거한 변이에서 새 회귀 테스트가 같은 패닉으로 실패하는
+  것을 재현했다. 되돌린 뒤 `controlStates=4`, 해석해 일치를 확인했다.
+- `ui/public/wasm`의 바이너리가 수정 커밋보다 4분 앞선 시각이어서 수정 전
+  코어일 가능성이 있었다. 현재 코어로 `wasm-pack`을 다시 빌드해 프리뷰에서
+  직접 호출한 결과 `controlStates=4`, 8셀, peak 8, `P(a=0)=0.0263671875`,
+  `P(a=7)=0.0009765625`였다. 보고값과 일치한다.
+- `E012`/`W010` 두 경로를 각각 재현했다. 도달 1,667 × 3,000시행 × 2리프는
+  71ms에 하한 표기(`control>=1667`, `entries>=10002000`)로 거부되고,
+  도달 501 × 500시행 × 2리프 = 501,000은 정확한 개수의 `W010`만 낸다.
+- 성능 영향 없음. 12,007,001 선언 상태 모델 `validate` 57~61ms,
+  simple-pity 55~56ms.
+- `git diff fd19dbb origin/dev -- presets/`가 공집합이다. 골든 파일이
+  한 바이트도 바뀌지 않았다.
+- `push_probability_table_size_diagnostic`의 `W010` 분기에 있는
+  `is_lower_bound` 처리는 도달 불가능하다. 하한 표기가 붙는 호출은 항상
+  하드 상한을 초과해 `E012`로 반환한다. 방어적 중복이라 해롭지 않으며,
+  이 함수를 다시 만질 때 정리한다.
+
+## 2026-07-30 프로덕션 배포 (`main` `51b5f2e`)
+
+- 소유자 판단으로 `dev` `0a8d761`을 `main`에 `--no-ff` 병합했다. PR #13~#22가
+  한 번에 올라갔다 — UI polish, Arknights 2/98 정정, 출처 추적, Blockly 보장
+  규칙, 저장소 실패 복구, DP 런타임 상한, 확률표 방어, 도달 회귀 수정.
+- 병합 후 `git diff main dev`가 공집합이다.
+- GitHub Actions **CI**와 **Deploy to Netlify** 모두 success다.
+  `Verify Netlify credentials`와 `Deploy production site`가 통과했고
+  시크릿은 이름으로만 참조한다. 프로덕션 URL은
+  `https://gacha-simul.netlify.app`이다.
+- 배포된 사이트에서 이번 회귀 모델을 직접 실행해 `controlStates=4`, 8셀,
+  `P(a=0)=0.0263671875`, `P(a=7)=0.0009765625`를 확인했다. 수정 전이라면
+  wasm 패닉으로 탭이 죽는 모델이므로, 수정이 프로덕션에 반영된 증거다.
+  `#root` 57,626자, 콘솔 오류 0건.
