@@ -1,4 +1,4 @@
-use gacha_core::{compile, ModelIr, Severity};
+use gacha_core::{compile, run_dp, DpOptions, DpRunResult, ModelIr, Severity};
 use serde_json::{json, Value};
 
 fn base_model(probability: Value, state_vars: Vec<Value>) -> ModelIr {
@@ -216,29 +216,19 @@ fn two_control_probability() -> Value {
 }
 
 #[test]
-fn probability_table_preflight_warns_and_rejects_before_expansion() {
-    let warning_model = compile(&probability_table_model(
-        700,
-        400,
-        two_control_probability(),
-    ))
-    .expect("562K probability entries must remain below the hard limit");
-    let warning = warning_model
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "W010")
-        .expect("large probability tables must warn");
-    assert!(warning.message.contains("562202"));
-    assert!(warning.message.contains("control=281101"));
-    assert!(warning.message.contains("trials=1"));
-    assert!(warning.message.contains("leaves=2"));
-
-    let error = compile(&probability_table_model(
+fn probability_table_preflight_rejects_trial_expansion_before_allocation() {
+    let mut ir = probability_table_model(
         3_000,
         4_000,
-        two_control_probability(),
-    ))
-    .expect_err("24M probability entries must be rejected before allocation");
+        json!({
+            "if": {"eq": [{"trial": true}, {"lit": "1"}]},
+            "then": {"lit": "1/2"},
+            "else": {"lit": "1/2"}
+        }),
+    );
+    ir.run.max_trials = 5_000_001;
+    let error =
+        compile(&ir).expect_err("10M probability entries must be rejected before allocation");
     let diagnostic = error
         .diagnostics
         .iter()
@@ -251,22 +241,143 @@ fn probability_table_preflight_warns_and_rejects_before_expansion() {
             .all(|diagnostic| diagnostic.code != "W010"),
         "E012 must replace the lower-severity W010 signal",
     );
-    assert!(diagnostic.message.contains("24014002"));
-    assert!(diagnostic.message.contains("control=12007001"));
+    assert!(diagnostic.message.contains("10000002"));
+    assert!(diagnostic.message.contains("control=1"));
+    assert!(diagnostic.message.contains("trials=5000001"));
 }
 
 #[test]
-fn control_invariant_probability_table_counts_the_folded_control_axis() {
+fn unreachable_declared_controls_are_folded_and_the_model_runs() {
     let model = compile(&probability_table_model(
         3_000,
         4_000,
-        json!({"lit": "1/2"}),
+        two_control_probability(),
     ))
-    .expect("control-independent probability table must fold before the hard guard");
+    .expect("only the initial control state is reachable without transitions");
     assert_eq!(model.prob_table.entries.len(), 1);
     assert!(model.prob_table.entry_control_invariant);
+    assert_eq!(model.analysis.control_states, 1);
+    assert!(model.analysis.dp_available);
     assert!(!model
         .diagnostics
         .iter()
         .any(|diagnostic| matches!(diagnostic.code.as_str(), "W010" | "E012")));
+
+    let result = run_dp(&model, DpOptions::default(), |_, _| true)
+        .expect("the reachable-state model must execute");
+    let DpRunResult::Approximate(result) = result else {
+        panic!("scaled model must use the approximate DP result");
+    };
+    assert_eq!(result.trials, 2);
+    assert_eq!(result.peak_states, 3);
+    assert_eq!(result.joint.len(), 3);
+}
+
+#[test]
+fn reachable_control_table_uses_dense_indices_for_sparse_states() {
+    let ir: ModelIr = serde_json::from_value(json!({
+        "irVersion": 1,
+        "name": "sparse reachable controls",
+        "entities": [{
+            "id": "hit",
+            "name": "hit",
+            "prob": {
+                "add": [
+                    {"lit": "1/4"},
+                    {"mul": [{"lit": "1/20"}, {"var": "pity"}]}
+                ]
+            }
+        }],
+        "stateVars": [
+            {"id": "pity", "init": 0, "max": 10, "role": "control"}
+        ],
+        "probRules": [],
+        "transitions": [{
+            "when": {"leafOf": "hit"},
+            "set": {"pity": {"add": [{"var": "pity"}, {"lit": "2"}]}}
+        }],
+        "triggers": [],
+        "run": {
+            "maxTrials": 2,
+            "trackJoint": ["hit"],
+            "numeric": "scaled",
+            "trialSeries": "none"
+        }
+    }))
+    .expect("sparse reachable-control model must deserialize");
+
+    let model = compile(&ir).expect("sparse reachable-control model must compile");
+    assert_eq!(model.analysis.control_states, 3);
+    assert_eq!(model.prob_table.entries.len(), 3);
+    assert_eq!(
+        model
+            .prob_table
+            .control_entry_indices
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![0, 2, 4],
+    );
+    assert_eq!(model.transition_table.entries.len(), 3);
+    assert_eq!(model.transition_control_index(2, 0, 2), 4);
+
+    let result = run_dp(&model, DpOptions::default(), |_, _| true)
+        .expect("dense probability and transition indices must execute");
+    let DpRunResult::Approximate(result) = result else {
+        panic!("scaled model must use the approximate DP result");
+    };
+    assert_eq!(result.trials, 2);
+    assert_eq!(result.joint.len(), 3);
+}
+
+#[test]
+fn reachable_controls_include_trigger_assignments() {
+    let ir: ModelIr = serde_json::from_value(json!({
+        "irVersion": 1,
+        "name": "trigger reachable controls",
+        "entities": [{
+            "id": "hit",
+            "name": "hit",
+            "prob": {
+                "add": [
+                    {"lit": "1/4"},
+                    {"mul": [{"lit": "1/20"}, {"var": "pity"}]}
+                ]
+            }
+        }],
+        "stateVars": [
+            {"id": "pity", "init": 0, "max": 10, "role": "control"}
+        ],
+        "probRules": [],
+        "transitions": [],
+        "triggers": [{
+            "at": {"trialCount": 1},
+            "set": {"pity": {"lit": "5"}}
+        }],
+        "run": {
+            "maxTrials": 2,
+            "trackJoint": ["hit"],
+            "numeric": "scaled",
+            "trialSeries": "none"
+        }
+    }))
+    .expect("trigger reachable-control model must deserialize");
+
+    let model = compile(&ir).expect("trigger reachable-control model must compile");
+    assert_eq!(
+        model
+            .prob_table
+            .control_entry_indices
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![0, 5],
+    );
+    let result = run_dp(&model, DpOptions::default(), |_, _| true)
+        .expect("trigger-assigned control state must be present in the probability table");
+    let DpRunResult::Approximate(result) = result else {
+        panic!("scaled model must use the approximate DP result");
+    };
+    assert_eq!(result.trials, 2);
+    assert_eq!(result.joint.len(), 3);
 }

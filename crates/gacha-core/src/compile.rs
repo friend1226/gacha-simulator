@@ -61,6 +61,7 @@ pub struct ProbTable {
 #[derive(Debug, Clone)]
 pub struct TransitionTable {
     pub entries: Vec<Vec<Vec<usize>>>,
+    pub control_entry_indices: BTreeMap<usize, usize>,
     pub trial_dependent: bool,
 }
 
@@ -244,7 +245,16 @@ impl CompiledModel {
         } else {
             0
         };
-        self.transition_table.entries[control_index][ti][leaf]
+        let entry_index = if self.transition_table.control_entry_indices.is_empty() {
+            control_index
+        } else {
+            *self
+                .transition_table
+                .control_entry_indices
+                .get(&control_index)
+                .expect("runtime control state must be present in the transition table")
+        };
+        self.transition_table.entries[entry_index][ti][leaf]
     }
 
     pub fn accumulator_transition(
@@ -714,6 +724,32 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         return Err(CompileError { diagnostics });
     }
 
+    let leaf_lookup: HashMap<_, _> = leaves
+        .iter()
+        .enumerate()
+        .map(|(i, l)| (l.id.as_str(), i))
+        .collect();
+    let transitions = compile_transitions(&ir.transitions, &leaves, &control_ids, &mut diagnostics);
+    let triggers = compile_triggers(
+        &ir.triggers,
+        &leaves,
+        &leaf_lookup,
+        &control_ids,
+        &mut diagnostics,
+    );
+    let transition_trial_dependent = transitions
+        .iter()
+        .flat_map(|transition| &transition.assignments)
+        .any(|(_, program)| program.trial_dependent);
+    let transition_trials = if transition_trial_dependent {
+        ir.run.max_trials.max(1)
+    } else {
+        1
+    };
+    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        return Err(CompileError { diagnostics });
+    }
+
     let trial_dependent = entity_defs.iter().any(entity_trial_dependent);
     let probability_control_dependent = entity_defs_control_dependent(&entity_defs, &control_ids);
     let table_trials = if trial_dependent {
@@ -721,47 +757,59 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     } else {
         1
     };
-    let probability_table_controls = if probability_control_dependent {
-        control_states
+    let initial_control_index = encode_control(&control_init, &control_max);
+    let probability_control_indices = if probability_control_dependent {
+        let entries_per_control = u128::from(table_trials).saturating_mul(leaves.len() as u128);
+        let reachable_limit =
+            (PROBABILITY_TABLE_MAX_ENTRIES / entries_per_control).min(usize::MAX as u128) as usize;
+        match reachable_control_indices(
+            &transitions,
+            &control_ids,
+            &control_init,
+            &control_max,
+            leaves.len(),
+            transition_trial_dependent,
+            &triggers,
+            ir.run.max_trials,
+            reachable_limit,
+        ) {
+            Ok(indices) => indices,
+            Err(discovered_controls) => {
+                push_probability_table_size_diagnostic(
+                    discovered_controls as u64,
+                    table_trials,
+                    leaves.len(),
+                    &mut diagnostics,
+                );
+                return Err(CompileError { diagnostics });
+            }
+        }
     } else {
-        1
+        vec![initial_control_index]
     };
-    let probability_table_entries = u128::from(probability_table_controls)
-        .saturating_mul(u128::from(table_trials))
-        .saturating_mul(leaves.len() as u128);
-    let probability_table_axes = format!(
-        "control={probability_table_controls}, trials={table_trials}, leaves={}, entries={probability_table_entries}",
+    let probability_table_controls = probability_control_indices.len() as u64;
+    if !push_probability_table_size_diagnostic(
+        probability_table_controls,
+        table_trials,
         leaves.len(),
-    );
-    if probability_table_entries > PROBABILITY_TABLE_MAX_ENTRIES {
-        diagnostics.push(error(
-            "E012",
-            format!(
-                "probability precompute table requires {probability_table_entries} entries, exceeding hard limit {PROBABILITY_TABLE_MAX_ENTRIES}; axes: {probability_table_axes}; reduce control max or remove control variable references from probability expressions"
-            ),
-            None,
-        ));
+        &mut diagnostics,
+    ) {
         return Err(CompileError { diagnostics });
     }
-    if probability_table_entries >= PROBABILITY_TABLE_WARNING_ENTRIES {
-        diagnostics.push(warning(
-            "W010",
-            format!(
-                "probability precompute table requires {probability_table_entries} entries; axes: {probability_table_axes}; reduce control max or remove control variable references from probability expressions"
-            ),
-            None,
-        ));
-    }
 
-    let probability_control_indices: Vec<u64> = if probability_control_dependent {
-        (0..control_states).collect()
+    let mut probability_control_entry_indices = if probability_control_dependent {
+        probability_control_indices
+            .iter()
+            .enumerate()
+            .map(|(entry_index, control_index)| (*control_index, entry_index))
+            .collect()
     } else {
-        vec![encode_control(&control_init, &control_max) as u64]
+        BTreeMap::new()
     };
     let mut entries = Vec::with_capacity(probability_control_indices.len());
     let mut clamp_events = 0u64;
-    for ci in probability_control_indices {
-        let control = decode_control(ci, &control_max);
+    for ci in &probability_control_indices {
+        let control = decode_control(*ci as u64, &control_max);
         let mut by_trial = Vec::with_capacity(table_trials as usize);
         for trial in 1..=table_trials {
             match calculate_leaf_probs(
@@ -805,13 +853,9 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     });
     if probability_control_invariant {
         entries.truncate(1);
+        probability_control_entry_indices.clear();
     }
 
-    let leaf_lookup: HashMap<_, _> = leaves
-        .iter()
-        .enumerate()
-        .map(|(i, l)| (l.id.as_str(), i))
-        .collect();
     let accumulator_table = compile_accumulator_table(
         ir,
         &leaves,
@@ -822,26 +866,34 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         ir.run.max_trials,
         &mut diagnostics,
     );
+    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        return Err(CompileError { diagnostics });
+    }
     let control_invariant = probability_control_invariant
         && !accumulator_table
             .control_dependent
             .iter()
             .any(|dependent| *dependent);
-    let transitions = compile_transitions(&ir.transitions, &leaves, &control_ids, &mut diagnostics);
-    let transition_trial_dependent = transitions
-        .iter()
-        .flat_map(|transition| &transition.assignments)
-        .any(|(_, program)| program.trial_dependent);
-    let transition_trials = if transition_trial_dependent {
-        ir.run.max_trials.max(1)
-    } else {
-        1
-    };
     let mut transition_entries = Vec::new();
+    let mut transition_control_entry_indices = BTreeMap::new();
     if !transitions.is_empty() && !control_invariant {
-        transition_entries.reserve(control_states as usize);
-        for ci in 0..control_states {
-            let control = decode_control(ci, &control_max);
+        let transition_control_indices: Vec<usize> = if probability_control_dependent {
+            probability_control_indices.clone()
+        } else {
+            (0..control_states)
+                .map(|control_index| control_index as usize)
+                .collect()
+        };
+        if probability_control_dependent {
+            transition_control_entry_indices = transition_control_indices
+                .iter()
+                .enumerate()
+                .map(|(entry_index, control_index)| (*control_index, entry_index))
+                .collect();
+        }
+        transition_entries.reserve(transition_control_indices.len());
+        for ci in transition_control_indices {
+            let control = decode_control(ci as u64, &control_max);
             let mut by_trial = Vec::with_capacity(transition_trials as usize);
             for trial in 1..=transition_trials {
                 let mut by_leaf = Vec::with_capacity(leaves.len());
@@ -865,15 +917,9 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     }
     let transition_table = TransitionTable {
         entries: transition_entries,
+        control_entry_indices: transition_control_entry_indices,
         trial_dependent: transition_trial_dependent,
     };
-    let triggers = compile_triggers(
-        &ir.triggers,
-        &leaves,
-        &leaf_lookup,
-        &control_ids,
-        &mut diagnostics,
-    );
     warn_unapplied_consuming_grants(&ir.triggers, ir.run.max_trials, &mut diagnostics);
     let (tracked_leaves, tracked_dimensions, tracked_ids) = expand_tracked(
         &ir.run.track_joint,
@@ -998,7 +1044,14 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         states.saturating_mul(u64::from(*maximum) + 1)
     });
     let stat_states = count_states.saturating_mul(accumulator_states);
-    let total_states = control_states.saturating_mul(stat_states);
+    let effective_control_states = if control_invariant {
+        1
+    } else if probability_control_dependent {
+        probability_control_indices.len() as u64
+    } else {
+        control_states
+    };
+    let total_states = effective_control_states.saturating_mul(stat_states);
     let state_encoding_available = crate::state::StateCodec::with_accumulators(
         &control_max,
         &accumulator_max,
@@ -1006,7 +1059,7 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     )
     .is_ok();
     let dp_available = state_encoding_available
-        && control_states <= DP_CONTROL_STATE_LIMIT
+        && effective_control_states <= DP_CONTROL_STATE_LIMIT
         && total_states <= DP_ESTIMATED_STATE_LIMIT;
     let blockers = if dp_available {
         Vec::new()
@@ -1018,7 +1071,7 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     let analysis = MarkovAnalysis {
         dp_available,
         blockers,
-        control_states,
+        control_states: effective_control_states,
         stat_states,
         total_states,
         est_bytes_per_layer: total_states.saturating_mul(40),
@@ -1050,7 +1103,7 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
             entries,
             trial_dependent,
             entry_control_invariant: probability_control_invariant,
-            control_entry_indices: BTreeMap::new(),
+            control_entry_indices: probability_control_entry_indices,
             control_invariant,
             clamp_events,
         },
@@ -1763,6 +1816,206 @@ fn encode_control(values: &[u32], maxes: &[u32]) -> usize {
     index
 }
 
+fn reachable_control_indices(
+    transitions: &[CompiledTransition],
+    control_ids: &[String],
+    control_init: &[u32],
+    control_max: &[u32],
+    leaf_count: usize,
+    transition_trial_dependent: bool,
+    triggers: &[CompiledTrigger],
+    max_trials: u32,
+    reachable_limit: usize,
+) -> Result<Vec<usize>, usize> {
+    let initial_index = encode_control(control_init, control_max);
+    if reachable_limit == 0 {
+        return Err(1);
+    }
+    let trigger_changes_control = triggers.iter().any(|trigger| {
+        !trigger.assignments.is_empty()
+            || trigger
+                .grant
+                .as_ref()
+                .is_some_and(|grant| grant.applies_transitions && grant.amount > 0)
+    });
+    if transitions.is_empty() && !trigger_changes_control {
+        return Ok(vec![initial_index]);
+    }
+
+    let mut reachable = BTreeSet::from([initial_index]);
+    let mut layer = BTreeSet::from([initial_index]);
+    let mut completed_trials = 0u32;
+    while completed_trials < max_trials {
+        let draw_trial = completed_trials + 1;
+        let mut next_layer = BTreeSet::new();
+        let mut added_reachable = false;
+        for control_index in layer {
+            let control = decode_control(control_index as u64, control_max);
+            for leaf in 0..leaf_count {
+                let mut next = control.clone();
+                apply_compiled_transitions(
+                    transitions,
+                    control_ids,
+                    control_max,
+                    &mut next,
+                    &control,
+                    leaf,
+                    draw_trial,
+                );
+                apply_compiled_triggers_to_control(
+                    triggers,
+                    transitions,
+                    control_ids,
+                    control_max,
+                    &mut next,
+                    draw_trial,
+                    max_trials,
+                );
+                let next_index = encode_control(&next, control_max);
+                next_layer.insert(next_index);
+                if reachable.insert(next_index) {
+                    added_reachable = true;
+                    if reachable.len() > reachable_limit {
+                        return Err(reachable.len());
+                    }
+                }
+            }
+        }
+        let next_completed_trials =
+            draw_trial + compiled_consumed_trials_after(triggers, draw_trial, max_trials);
+        layer = next_layer;
+        if !transition_trial_dependent && !added_reachable {
+            let next_trigger_trial = triggers
+                .iter()
+                .map(|trigger| trigger.trial_count)
+                .filter(|trial| *trial > next_completed_trials && *trial <= max_trials)
+                .min();
+            let Some(next_trigger_trial) = next_trigger_trial else {
+                break;
+            };
+            completed_trials = next_trigger_trial - 1;
+        } else {
+            completed_trials = next_completed_trials;
+        }
+    }
+    Ok(reachable.into_iter().collect())
+}
+
+fn compiled_consumed_trials_after(
+    triggers: &[CompiledTrigger],
+    trial: u32,
+    max_trials: u32,
+) -> u32 {
+    let requested = triggers
+        .iter()
+        .filter(|trigger| trigger.trial_count == trial)
+        .filter(|trigger| {
+            trigger
+                .grant
+                .as_ref()
+                .is_some_and(|grant| grant.consumes_trial)
+        })
+        .count() as u32;
+    requested.min(max_trials.saturating_sub(trial))
+}
+
+fn apply_compiled_triggers_to_control(
+    triggers: &[CompiledTrigger],
+    transitions: &[CompiledTransition],
+    control_ids: &[String],
+    control_max: &[u32],
+    control: &mut [u32],
+    trial: u32,
+    max_trials: u32,
+) {
+    let max_consumed = compiled_consumed_trials_after(triggers, trial, max_trials);
+    let mut consumed = 0u32;
+    for trigger in triggers
+        .iter()
+        .filter(|trigger| trigger.trial_count == trial)
+    {
+        let action_trial = trial + consumed;
+        let before = control.to_vec();
+        for (index, program) in &trigger.assignments {
+            if let Ok(value) = eval(
+                program,
+                |name| {
+                    control_ids
+                        .iter()
+                        .position(|id| id == name)
+                        .map(|i| Rational::from_integer(before[i].into()))
+                },
+                action_trial,
+            )
+            .and_then(|value| value.number())
+            {
+                control[*index] = value
+                    .to_integer()
+                    .to_u32()
+                    .unwrap_or(u32::MAX)
+                    .min(control_max[*index]);
+            }
+        }
+        if let Some(grant) = &trigger.grant {
+            if grant.consumes_trial {
+                if consumed >= max_consumed {
+                    continue;
+                }
+                consumed += 1;
+            }
+            if grant.applies_transitions {
+                let grant_trial = trial + consumed;
+                for _ in 0..grant.amount {
+                    let before = control.to_vec();
+                    apply_compiled_transitions(
+                        transitions,
+                        control_ids,
+                        control_max,
+                        control,
+                        &before,
+                        grant.leaf,
+                        grant_trial,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn push_probability_table_size_diagnostic(
+    control_count: u64,
+    trial_count: u32,
+    leaf_count: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let entry_count = u128::from(control_count)
+        .saturating_mul(u128::from(trial_count))
+        .saturating_mul(leaf_count as u128);
+    let axes = format!(
+        "control={control_count}, trials={trial_count}, leaves={leaf_count}, entries={entry_count}"
+    );
+    if entry_count > PROBABILITY_TABLE_MAX_ENTRIES {
+        diagnostics.push(error(
+            "E012",
+            format!(
+                "probability precompute table requires {entry_count} entries, exceeding hard limit {PROBABILITY_TABLE_MAX_ENTRIES}; axes: {axes}; reduce reachable control states, maxTrials, or probability leaves"
+            ),
+            None,
+        ));
+        return false;
+    }
+    if entry_count >= PROBABILITY_TABLE_WARNING_ENTRIES {
+        diagnostics.push(warning(
+            "W010",
+            format!(
+                "probability precompute table requires {entry_count} entries; axes: {axes}; reduce reachable control states, maxTrials, or probability leaves"
+            ),
+            None,
+        ));
+    }
+    true
+}
+
 fn compile_transitions(
     transitions: &[Transition],
     leaves: &[Leaf],
@@ -2352,5 +2605,30 @@ mod tests {
         assert_eq!(probs[0], Rational::new(7.into(), 1000.into()));
         assert_eq!(probs[1], Rational::new(23.into(), 1000.into()));
         assert_eq!(probs[2], Rational::new(970.into(), 1000.into()));
+    }
+
+    #[test]
+    fn probability_table_size_diagnostics_cover_warning_and_hard_limits() {
+        let mut diagnostics = Vec::new();
+        assert!(push_probability_table_size_diagnostic(
+            250_000,
+            1,
+            2,
+            &mut diagnostics,
+        ));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "W010");
+        assert!(diagnostics[0].message.contains("entries=500000"));
+
+        diagnostics.clear();
+        assert!(!push_probability_table_size_diagnostic(
+            5_000_001,
+            1,
+            2,
+            &mut diagnostics,
+        ));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E012");
+        assert!(diagnostics[0].message.contains("entries=10000002"));
     }
 }
