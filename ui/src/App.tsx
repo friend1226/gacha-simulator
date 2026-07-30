@@ -14,9 +14,9 @@ import { HelpPanel } from "./panels/HelpPanel";
 import { ModelPanel } from "./panels/ModelPanel";
 import { ResultPanel } from "./panels/ResultPanel";
 import { SettingsPanel } from "./panels/SettingsPanel";
+import { MODEL_STORAGE } from "./storage";
 
 type TopTab = "model" | "results" | "help" | "settings";
-const MODEL_STORAGE = "gacha-lab.model.v2";
 const MOBILE_BLOCK_NOTICE_STORAGE = "gacha-lab.mobile-block-notice.dismissed";
 const MOBILE_LAYOUT_CSS_FLAG = "--gacha-mobile-layout";
 
@@ -66,7 +66,11 @@ export function App() {
 
   useEffect(() => {
     modelRef.current = model;
-    localStorage.setItem(MODEL_STORAGE, JSON.stringify(model));
+    try {
+      localStorage.setItem(MODEL_STORAGE, JSON.stringify(model));
+    } catch {
+      // Keep the current model usable when persistent storage is unavailable.
+    }
     setEngineError(undefined);
   }, [model]);
   useEffect(() => { settingsRef.current = settings; saveSettings(settings); }, [settings]);

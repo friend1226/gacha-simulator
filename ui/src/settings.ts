@@ -53,7 +53,11 @@ export function saveSettings(
   settings: AppSettings,
   storage: Pick<Storage, "setItem"> = localStorage,
 ) {
-  storage.setItem(STORAGE_KEY, JSON.stringify(normalizeSettings(settings)));
+  try {
+    storage.setItem(STORAGE_KEY, JSON.stringify(normalizeSettings(settings)));
+  } catch {
+    // Keep in-memory settings usable when persistent storage is unavailable.
+  }
 }
 
 export function formatProbability(value: number, format: ProbabilityFormat): string {

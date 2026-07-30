@@ -664,3 +664,24 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   [Windows 코드 서명](https://v2.tauri.app/distribute/sign/windows/),
   [macOS 코드 서명](https://v2.tauri.app/distribute/sign/macos/),
   [Tauri 사전 요구사항](https://v2.tauri.app/start/prerequisites/).
+
+## 2026-07-30 LIVE A — 저장소 실패 복구
+
+- 모델과 설정의 `localStorage.setItem` 예외를 흡수해 저장소 차단·용량 초과가
+  현재 편집과 계산을 중단하지 않게 했다. 모델·설정 읽기 경로도 예외와 손상 JSON
+  모두 기본값으로 복구함을 테스트로 고정했다.
+- 최상위 React error boundary를 추가했다. 오류가 발생하면 한국어 안내,
+  새로고침, `gacha-lab.model.v2` 저장 모델 삭제 후 재시작, 접이식 원본 오류
+  메시지를 제공한다. 저장소 삭제 자체가 실패해도 새로고침은 수행한다.
+- 실제 프로덕션 미리보기에서 `Storage.prototype.setItem`이 항상
+  `QuotaExceededError`를 던지도록 한 뒤 Arknights 프리셋 전환(루트
+  57,719자), 블록 필드 수정(57,798자), IR JSON 적용(62,624자)을 순서대로
+  수행했고 앱이 계속 동작했다. 정상 저장소에서는 simple-pity 모델을 저장한 뒤
+  새로고침해 `90회 하드 천장` 모델이 복구됐다.
+- 임시 오류 컴포넌트로 경계 화면과 원본 메시지를 확인하고 임시 코드를 제거했다.
+  `저장된 모델 지우고 다시 시작`을 누른 뒤 기본 Blue Archive 모델로 복귀하는
+  것까지 확인했다.
+- `npx tsc --noEmit`, 10개 파일의 UI 33/33 테스트, 1,606개 모듈의 프로덕션
+  빌드가 통과했다. `cargo test --workspace`는 core 55/55와 CLI 2/2를 포함해
+  전부 통과했고 세 프리셋 골든도 불변이다. 실제 브라우저의 정상 경로 콘솔 오류는
+  0건이었으며 375px에서 `innerWidth=375`, `body.scrollWidth=360`이었다.
