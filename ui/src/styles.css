@@ -1,6 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+KR:wght@400;500;600;700&display=swap");
 
-:root { font-family: "Noto Sans KR", system-ui, sans-serif; color: #e9edf5; background: #0d0f14; font-synthesis: none; }
+:root { --gacha-mobile-layout: 0; font-family: "Noto Sans KR", system-ui, sans-serif; color: #e9edf5; background: #0d0f14; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; min-height: 100dvh; background: #0d0f14; }
 button, select, textarea, input { font: inherit; color: inherit; }
@@ -19,6 +19,18 @@ button { cursor: pointer; }
 .file-button input { display: none; }
 .source-badge { padding: 3px 7px; border-radius: 99px; background: #3a2d1d; color: #e8b968; font-size: 9px; }
 .source-badge.official { background: #18352c; color: #65d6a4; }
+.source-badge.modified { background: #2b2940; color: #bcb5e7; }
+.fatal-error-shell { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: #0d0f14; }
+.fatal-error-card { width: min(560px, 100%); padding: 28px; border: 1px solid #343b49; border-radius: 14px; background: #171b24; box-shadow: 0 18px 54px rgba(0,0,0,.38); }
+.fatal-error-kicker { margin: 0 0 8px; color: #ff91b5; font-size: 12px; font-weight: 700; }
+.fatal-error-card h1 { margin: 0 0 10px; font-size: 22px; }
+.fatal-error-card > p:not(.fatal-error-kicker) { margin: 0; color: #aeb6c6; line-height: 1.65; }
+.fatal-error-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0; }
+.fatal-error-actions button { min-height: 38px; padding: 0 14px; border: 1px solid #4a5262; border-radius: 8px; background: #262c38; }
+.fatal-error-actions button.danger { border-color: #70404d; background: #3b242c; color: #ffb5c8; }
+.fatal-error-card details { color: #9ca5b5; font-size: 12px; }
+.fatal-error-card summary { cursor: pointer; }
+.fatal-error-card pre { max-height: 180px; overflow: auto; padding: 12px; border-radius: 7px; background: #0f1218; color: #d5dbea; white-space: pre-wrap; overflow-wrap: anywhere; }
 .app-main, .tab-fill { min-width: 0; min-height: 0; height: 100%; overflow: auto; }
 .model-layout { min-width: 0; height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(560px, 1fr) 390px; }
 .editor { min-width: 0; position: relative; display: grid; grid-template-rows: 49px 1fr; }
@@ -36,12 +48,14 @@ button { cursor: pointer; }
 .apply { position: absolute; right: 30px; top: 30px; padding: 8px 12px; border: 0; border-radius: 7px; background: #6c5ce7; }
 .validation-panel { min-width: 0; overflow: auto; border-left: 1px solid #262b36; background: #151820; }
 .aside-title { height: 49px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid #282e3a; font-size: 13px; font-weight: 600; }
-.unsupported-block-warning { margin: 12px; padding: 12px; border: 1px solid #705d2d; border-radius: 8px; background: #282315; color: #d9c786; font-size: 11px; line-height: 1.5; }
+.unsupported-block-warning { margin: 12px; padding: 12px; border: 1px solid #292f3b; border-radius: 8px; background: #1b202a; color: #9da6b6; font-size: 11px; line-height: 1.5; }
 .unsupported-block-warning b, .unsupported-block-warning span { display: block; }
-.unsupported-block-warning span { margin-top: 4px; color: #b8ad86; }
+.unsupported-block-warning span { margin-top: 4px; }
+.unsupported-block-warning details { margin: 8px 0; }
+.unsupported-block-warning summary { color: #b7c0cf; cursor: pointer; }
 .unsupported-block-warning ul { margin: 8px 0; padding-left: 18px; }
-.unsupported-block-warning code { color: #e4d59c; }
-.unsupported-block-warning button { display: flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #705d2d; border-radius: 6px; background: #332c1b; }
+.unsupported-block-warning code { color: #cbd3df; }
+.unsupported-block-warning button { display: flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #303744; border-radius: 6px; background: #202631; color: #c5cedb; }
 .status { font-size: 11px; padding: 3px 8px; border-radius: 999px; }
 .status.good { color: #65d6a4; background: #18352c; }
 .status.bad { color: #ff8796; background: #3b2027; }
@@ -170,6 +184,7 @@ button { cursor: pointer; }
   .settings-grid, .help-columns, .glossary, .diagnostic-help { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
+  :root { --gacha-mobile-layout: 1; }
   .brand b { display: none; }
   .header-actions { order: 2; width: 100%; }
   .header-actions select { flex: 1 1 auto; width: 0; max-width: none; }

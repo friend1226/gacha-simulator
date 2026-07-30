@@ -3,7 +3,9 @@ import { BookOpen, FlaskConical, RotateCcw, Save, Settings, Upload } from "lucid
 import { Blockly, getUnsupportedBlockItems, installWorkspaceVolume, loadIr, toolbox, workspaceToIr, type UnsupportedBlockItem } from "./blockly";
 import { EngineCancelledError, loadEngineBackend, runDpJson, type EngineBackend, type EngineProgress } from "./engine";
 import { parseEngineError, type EngineErrorPresentation } from "./engineDiagnostics";
+import { confidenceLabel as confidenceLabelFor } from "./labels";
 import { blueArchive, presets } from "./preset";
+import { initialProvenance, nextProvenance, serializeModelForExport, type ModelProvenance, type ProvenanceEvent } from "./provenance";
 import { loadSettings, normalizeSettings, saveSettings, type AppSettings } from "./settings";
 import { normalizeFirstHit } from "./firstHit";
 import type { Diagnostic, EngineResult, ModelIr } from "./types";
@@ -12,27 +14,38 @@ import { HelpPanel } from "./panels/HelpPanel";
 import { ModelPanel } from "./panels/ModelPanel";
 import { ResultPanel } from "./panels/ResultPanel";
 import { SettingsPanel } from "./panels/SettingsPanel";
+import { MODEL_STORAGE } from "./storage";
 
 type TopTab = "model" | "results" | "help" | "settings";
-const MODEL_STORAGE = "gacha-lab.model.v2";
 const MOBILE_BLOCK_NOTICE_STORAGE = "gacha-lab.mobile-block-notice.dismissed";
+const MOBILE_LAYOUT_CSS_FLAG = "--gacha-mobile-layout";
 
-function initialModel(): ModelIr {
+function initialModel(): { model: ModelIr; provenance: ModelProvenance; selectedPreset: string } {
   try {
     const source = localStorage.getItem(MODEL_STORAGE);
-    return source ? JSON.parse(source) as ModelIr : structuredClone(blueArchive);
+    return {
+      model: source ? JSON.parse(source) as ModelIr : structuredClone(blueArchive),
+      provenance: initialProvenance(Boolean(source)),
+      selectedPreset: source ? "" : "blue-archive-pickup",
+    };
   } catch {
-    return structuredClone(blueArchive);
+    return {
+      model: structuredClone(blueArchive),
+      provenance: "pristine",
+      selectedPreset: "blue-archive-pickup",
+    };
   }
 }
 
 export function App() {
+  const [initial] = useState(initialModel);
   const blockHost = useRef<HTMLDivElement>(null);
   const workspace = useRef<Blockly.WorkspaceSvg>();
   const engineBackend = useRef<EngineBackend>();
   const executionId = useRef(0);
-  const [model, setModel] = useState<ModelIr>(initialModel);
+  const [model, setModel] = useState<ModelIr>(initial.model);
   const modelRef = useRef(model);
+  const [provenance, setProvenance] = useState<ModelProvenance>(initial.provenance);
   const [json, setJson] = useState(() => JSON.stringify(model, null, 2));
   const [topTab, setTopTab] = useState<TopTab>("model");
   const [editorTab, setEditorTab] = useState<"blocks" | "json">("blocks");
@@ -40,7 +53,7 @@ export function App() {
   const [showMobileBlockNotice, setShowMobileBlockNotice] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const settingsRef = useRef(settings);
-  const [selectedPreset, setSelectedPreset] = useState("blue-archive-pickup");
+  const [selectedPreset, setSelectedPreset] = useState(initial.selectedPreset);
   const [helpCode, setHelpCode] = useState<string>();
   const [message, setMessage] = useState("모델을 검증한 뒤 계산 방식을 선택하세요.");
   const [running, setRunning] = useState<"dp" | "mc">();
@@ -53,7 +66,11 @@ export function App() {
 
   useEffect(() => {
     modelRef.current = model;
-    localStorage.setItem(MODEL_STORAGE, JSON.stringify(model));
+    try {
+      localStorage.setItem(MODEL_STORAGE, JSON.stringify(model));
+    } catch {
+      // Keep the current model usable when persistent storage is unavailable.
+    }
     setEngineError(undefined);
   }, [model]);
   useEffect(() => { settingsRef.current = settings; saveSettings(settings); }, [settings]);
@@ -63,7 +80,6 @@ export function App() {
       setShowMobileBlockNotice(false);
       return;
     }
-    const media = window.matchMedia("(max-width: 620px)");
     const updateNotice = () => {
       let dismissed = false;
       try {
@@ -71,11 +87,14 @@ export function App() {
       } catch {
         // Keep the notice available when persistent storage is unavailable.
       }
-      setShowMobileBlockNotice(media.matches && !dismissed);
+      const mobileLayout = getComputedStyle(document.documentElement)
+        .getPropertyValue(MOBILE_LAYOUT_CSS_FLAG)
+        .trim() === "1";
+      setShowMobileBlockNotice(mobileLayout && !dismissed);
     };
     updateNotice();
-    media.addEventListener("change", updateNotice);
-    return () => media.removeEventListener("change", updateNotice);
+    window.addEventListener("resize", updateNotice);
+    return () => window.removeEventListener("resize", updateNotice);
   }, [editorTab]);
 
   useEffect(() => {
@@ -106,8 +125,7 @@ export function App() {
     const listener = (event: Blockly.Events.Abstract) => {
       if (event.isUiEvent) return;
       const next = workspaceToIr(ws, modelRef.current);
-      setModel(next);
-      setJson(JSON.stringify(next, null, 2));
+      setModelSynced(next, false, "blockEdit");
       setUnsupportedBlockItems(getUnsupportedBlockItems(ws));
     };
     ws.addChangeListener(listener);
@@ -126,9 +144,17 @@ export function App() {
     }
   }, [topTab]);
 
-  function setModelSynced(next: ModelIr, reloadBlocks = false) {
+  function setModelSynced(
+    next: ModelIr,
+    reloadBlocks = false,
+    provenanceEvent: ProvenanceEvent = "updateModel",
+  ) {
     setModel(next);
     setJson(JSON.stringify(next, null, 2));
+    setProvenance((current) => nextProvenance(current, provenanceEvent));
+    if (provenanceEvent === "openModel" || provenanceEvent === "restore") {
+      setSelectedPreset("");
+    }
     if (reloadBlocks && workspace.current) {
       setUnsupportedBlockItems(loadIr(workspace.current, next));
     }
@@ -137,7 +163,7 @@ export function App() {
   function applyJson() {
     try {
       const next = JSON.parse(json) as ModelIr;
-      setModelSynced(next, true);
+      setModelSynced(next, true, "applyJson");
       setMessage("JSON을 블록 워크스페이스에 적용했습니다.");
     } catch (error) {
       setMessage(`JSON 오류: ${String(error)}`);
@@ -149,7 +175,7 @@ export function App() {
     setSelectedPreset(preset.id);
     const next = structuredClone(preset.model);
     next.run.numeric = settingsRef.current.numeric;
-    setModelSynced(next, true);
+    setModelSynced(next, true, "loadPreset");
     setResults({});
     setMessage(`${preset.meta.game} · ${preset.meta.banner} 프리셋을 불러왔습니다.`);
   }
@@ -207,6 +233,7 @@ export function App() {
         engine: execution.engine === "EXACT" ? "Exact" : execution.engine,
         numeric: parsed.numeric ?? (engine === "mc" ? model.run.numeric : "scaled"),
         trials: parsed.trials ?? model.run.maxTrials,
+        peakStates: parsed.peakStates,
         runs: parsed.runs,
         seed: parsed.seed,
         trackedLeafIds: parsed.trackedLeafIds ?? [],
@@ -255,7 +282,7 @@ export function App() {
   }
 
   function saveModel() {
-    const url = URL.createObjectURL(new Blob([JSON.stringify(model, null, 2)], { type: "application/json" }));
+    const url = URL.createObjectURL(new Blob([serializeModelForExport(model, provenance)], { type: "application/json" }));
     const anchor = document.createElement("a");
     anchor.href = url; anchor.download = "gacha-model.json"; anchor.click();
     URL.revokeObjectURL(url);
@@ -264,14 +291,15 @@ export function App() {
   async function openModel(file?: File) {
     if (!file) return;
     try {
-      setModelSynced(JSON.parse(await file.text()) as ModelIr, true);
+      setModelSynced(JSON.parse(await file.text()) as ModelIr, true, "openModel");
       setMessage(`${file.name}을 불러왔습니다.`);
     } catch (error) {
       setMessage(`모델 파일 오류: ${String(error)}`);
     }
   }
 
-  const preset = presets.find((item) => item.id === selectedPreset) ?? presets[0];
+  const preset = presets.find((item) => item.id === selectedPreset);
+  const confidenceLabel = preset ? confidenceLabelFor(preset.meta.confidence) : "";
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -283,8 +311,18 @@ export function App() {
           <button className={topTab === "settings" ? "active" : ""} onClick={() => setTopTab("settings")}><Settings size={14} /> 설정</button>
         </nav>
         <div className="header-actions">
-          <select value={selectedPreset} onChange={(event) => loadPreset(event.target.value)}>{presets.map((item) => <option value={item.id} key={item.id}>{item.meta.game} · {item.meta.banner}</option>)}</select>
-          <span className={`source-badge ${preset.meta.confidence === "official" ? "official" : ""}`}>{preset.meta.confidence}</span>
+          <select value={selectedPreset} onChange={(event) => loadPreset(event.target.value)}>
+            {provenance === "none" && <option value="">현재 모델 · 출처 없음</option>}
+            {presets.map((item) => <option value={item.id} key={item.id}>{item.meta.game} · {item.meta.banner}</option>)}
+          </select>
+          {provenance !== "none" && preset && (
+            <span
+              className={`source-badge ${provenance === "dirty" ? "modified" : preset.meta.confidence === "official" ? "official" : ""}`}
+              title={`${preset.meta.confidence}${provenance === "dirty" ? " · 수정됨" : ""}`}
+            >
+              {confidenceLabel}{provenance === "dirty" ? " · 수정됨" : ""}
+            </span>
+          )}
           <button onClick={() => loadPreset()}><RotateCcw size={14} /> 초기화</button>
           <button onClick={saveModel}><Save size={14} /> 저장</button>
           <label className="file-button"><Upload size={14} /> 열기<input type="file" accept=".json,application/json" onChange={(event) => openModel(event.target.files?.[0])} /></label>

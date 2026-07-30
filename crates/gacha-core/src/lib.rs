@@ -14,7 +14,9 @@ pub mod state;
 pub use compile::{compile, CompiledModel, Diagnostic, Severity};
 #[cfg(not(target_arch = "wasm32"))]
 pub use engine_dp::{restore_dp_snapshot, run_dp_with_snapshots, SnapshotRunError};
-pub use engine_dp::{run_dp, DpOptions, DpResult, DpRunResult};
+pub use engine_dp::{
+    run_dp, DpError, DpOptions, DpResult, DpRunResult, DEFAULT_DP_MAX_LAYER_STATES,
+};
 pub use engine_exact::{
     run_exact, ExactFirstHitResult, ExactOptions, ExactProbability, ExactResult,
 };

@@ -58,10 +58,15 @@ fn exact_first_hit_matches_closed_form_and_scaled_dp() {
 
     let scaled_model =
         compile(&first_hit_model("scaled", "1/2", 3)).expect("scaled first-hit model must compile");
-    let DpRunResult::Approximate(scaled) =
-        run_dp(&scaled_model, DpOptions { prune_log10: None }, |_, _| true)
-            .expect("scaled first-hit run")
-    else {
+    let DpRunResult::Approximate(scaled) = run_dp(
+        &scaled_model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .expect("scaled first-hit run") else {
         panic!("scaled model must use approximate DP");
     };
     let scaled_first_hit = scaled.first_hit.expect("scaled first-hit result");

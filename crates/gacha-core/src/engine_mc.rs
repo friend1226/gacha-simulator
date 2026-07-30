@@ -376,12 +376,13 @@ fn run_stream(
         while trial < model.max_trials {
             let draw_trial = trial + 1;
             let ci = model.control_index(&control);
+            let probability_ci = model.probability_table_index(ci);
             let ti = if model.prob_table.trial_dependent {
                 draw_trial as usize - 1
             } else {
                 0
             };
-            let leaf = tables[ci][ti].sample(&mut rng);
+            let leaf = tables[probability_ci][ti].sample(&mut rng);
             counts[leaf] += 1;
             model.apply_transitions(&mut control, leaf, draw_trial);
             accumulator_clamps +=

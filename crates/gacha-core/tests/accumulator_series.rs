@@ -76,9 +76,15 @@ fn accumulator_model(numeric: &str) -> ModelIr {
 #[test]
 fn accumulator_axis_matches_across_dp_exact_and_mc_and_reports_clamps() {
     let scaled_model = compile(&accumulator_model("scaled")).unwrap();
-    let DpRunResult::Approximate(dp) =
-        run_dp(&scaled_model, DpOptions { prune_log10: None }, |_, _| true).unwrap()
-    else {
+    let DpRunResult::Approximate(dp) = run_dp(
+        &scaled_model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .unwrap() else {
         panic!("scaled model must use approximate DP");
     };
     assert_eq!(dp.tracked_leaf_ids, ["hit", "spent"]);
@@ -158,9 +164,15 @@ fn redundant_leaf_counter_is_derived_without_an_accumulator_state_axis() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "W008"));
-    let DpRunResult::Approximate(result) =
-        run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).unwrap()
-    else {
+    let DpRunResult::Approximate(result) = run_dp(
+        &model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .unwrap() else {
         panic!("scaled model must use approximate DP");
     };
     assert_eq!(
@@ -176,9 +188,15 @@ fn redundant_leaf_counter_is_derived_without_an_accumulator_state_axis() {
 #[test]
 fn marginal_series_preserves_mass_and_last_checkpoint_matches_joint() {
     let model = compile(&accumulator_model("scaled")).unwrap();
-    let DpRunResult::Approximate(result) =
-        run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).unwrap()
-    else {
+    let DpRunResult::Approximate(result) = run_dp(
+        &model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .unwrap() else {
         panic!("scaled model must use approximate DP");
     };
     assert_eq!(result.trial_series.marginal.len(), 2);
@@ -200,7 +218,10 @@ fn marginal_series_preserves_mass_and_last_checkpoint_matches_joint() {
     let checkpoint_model = compile(&ir).unwrap();
     let DpRunResult::Approximate(checkpoints) = run_dp(
         &checkpoint_model,
-        DpOptions { prune_log10: None },
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
         |_, _| true,
     )
     .unwrap() else {
@@ -261,9 +282,15 @@ fn control_dependent_accumulator_prevents_control_state_canonicalization() {
     .unwrap();
     let model = compile(&ir).unwrap();
     assert!(!model.prob_table.control_invariant);
-    let DpRunResult::Approximate(result) =
-        run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).unwrap()
-    else {
+    let DpRunResult::Approximate(result) = run_dp(
+        &model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .unwrap() else {
         panic!("scaled model must use approximate DP");
     };
     assert_eq!(result.joint.len(), 1);
@@ -291,9 +318,15 @@ fn mc_marginal_series_matches_dp_absorption_with_wilson_intervals() {
     }))
     .unwrap();
     let model = compile(&ir).unwrap();
-    let DpRunResult::Approximate(dp) =
-        run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).unwrap()
-    else {
+    let DpRunResult::Approximate(dp) = run_dp(
+        &model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .unwrap() else {
         panic!("scaled model must use approximate DP");
     };
     let mc = run_mc(

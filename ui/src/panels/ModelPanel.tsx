@@ -2,6 +2,7 @@ import { Activity, Braces, CircleAlert, CircleCheck, X } from "lucide-react";
 import type { RefObject } from "react";
 import type { UnsupportedBlockItem } from "../blockly";
 import type { Diagnostic, ModelIr, ValidationView } from "../types";
+import { DP_ESTIMATED_STATE_HARD_LIMIT } from "../validator";
 
 export function ModelPanel({
   blockHost,
@@ -64,9 +65,16 @@ export function ModelPanel({
         </div>
         {unsupportedBlockItems.length > 0 && (
           <div className="unsupported-block-warning" role="status">
-            <b>이 모델에는 블록으로 편집할 수 없는 규칙이 {unsupportedBlockItems.length}개 있습니다.</b>
-            <span>해당 규칙은 블록을 편집해도 보존됩니다. IR JSON 탭에서 확인하세요.</span>
-            <ul>{unsupportedBlockItems.map((item) => <li key={item.path}><code>{item.path}</code> · {item.description}</li>)}</ul>
+            <b>블록으로 표현되지 않는 규칙 {unsupportedBlockItems.length}개를 사용합니다.</b>
+            <span>블록을 편집해도 그대로 보존됩니다. 내용은 IR JSON 탭에서 볼 수 있습니다.</span>
+            {unsupportedBlockItems.length >= 4 ? (
+              <details>
+                <summary>규칙 경로 {unsupportedBlockItems.length}개 보기</summary>
+                <UnsupportedBlockList items={unsupportedBlockItems} />
+              </details>
+            ) : (
+              <UnsupportedBlockList items={unsupportedBlockItems} />
+            )}
             <button type="button" onClick={() => setEditorTab("json")}><Braces size={14} /> IR JSON 열기</button>
           </div>
         )}
@@ -81,7 +89,11 @@ export function ModelPanel({
         </div>
         <div className="analysis">
           <h3>분석</h3>
-          <Metric label="정확 계산" value={validation.estimatedStates <= 50_000_000 ? "가능" : "제한"} ok />
+          <Metric
+            label="정확 계산"
+            value={validation.estimatedStates <= DP_ESTIMATED_STATE_HARD_LIMIT ? "가능" : "제한"}
+            ok={validation.estimatedStates <= DP_ESTIMATED_STATE_HARD_LIMIT}
+          />
           <Metric label="가챠 규칙 상태" value={validation.controlStates.toLocaleString()} />
           <Metric label="계산 규모" value={`~${validation.estimatedStates.toLocaleString()}`} />
           <Metric label="수치 모드" value={model.run.numeric === "scaled" ? "표준" : model.run.numeric} />
@@ -97,6 +109,10 @@ export function ModelPanel({
       </aside>
     </div>
   );
+}
+
+function UnsupportedBlockList({ items }: { items: UnsupportedBlockItem[] }) {
+  return <ul>{items.map((item) => <li key={item.path}><code>{item.path}</code> · {item.description}</li>)}</ul>;
 }
 
 function Metric({ label, value, ok }: { label: string; value: string; ok?: boolean }) {

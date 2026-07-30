@@ -1,8 +1,12 @@
 import type { Diagnostic, Entity, LeafView, ModelIr, ValidationView } from "./types";
 
-// Keep these thresholds in sync with crates/gacha-core/src/compile.rs.
+// Keep these thresholds in sync with crates/gacha-core/src/compile.rs,
+// DEFAULT_DP_LAYER_STATE_LIMIT ↔ engine_dp::DEFAULT_DP_MAX_LAYER_STATES and
+// DP_ESTIMATED_STATE_HARD_LIMIT ↔ compile::DP_ESTIMATED_STATE_LIMIT.
 export const ACCUMULATOR_TABLE_WARNING_ENTRIES = 500_000;
 export const ACCUMULATOR_TABLE_MAX_ENTRIES = 10_000_000;
+export const DEFAULT_DP_LAYER_STATE_LIMIT = 1_000_000;
+export const DP_ESTIMATED_STATE_HARD_LIMIT = 50_000_000;
 
 export function parseExactLiteral(value: string): { numerator: bigint; denominator: bigint } {
   const source = value.trim();
@@ -105,7 +109,19 @@ export function validateLocally(ir: ModelIr): ValidationView {
   }
   const estimatedStates = controlStates * accumulatorStates
     * (ir.run.maxTrials + 1) ** Math.max(0, ir.run.trackJoint.length - 1);
-  if (estimatedStates > 50_000_000) diagnostics.push({ code: "W004", severity: "warning", message: "예상 상태 공간이 DP 권장 한계를 초과합니다" });
+  if (estimatedStates > DP_ESTIMATED_STATE_HARD_LIMIT) {
+    diagnostics.push({
+      code: "E011",
+      severity: "error",
+      message: `예상 상태 공간이 DP 한도 ${DP_ESTIMATED_STATE_HARD_LIMIT.toLocaleString()}개를 초과합니다`,
+    });
+  } else if (estimatedStates > DEFAULT_DP_LAYER_STATE_LIMIT) {
+    diagnostics.push({
+      code: "W004",
+      severity: "warning",
+      message: `예상 상태 공간이 기본 DP 레이어 상한 ${DEFAULT_DP_LAYER_STATE_LIMIT.toLocaleString()}개를 넘을 수 있습니다`,
+    });
+  }
   validateAccumulatorTable(ir, leaves, leafAncestors, controlStates, diagnostics);
   return { diagnostics, leaves, controlStates, estimatedStates, exactAvailable: true };
 }

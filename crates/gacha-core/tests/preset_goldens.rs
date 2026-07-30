@@ -66,8 +66,15 @@ fn canonical_result(result: &DpResult) -> serde_json::Value {
 fn assert_scaled_golden(preset_source: &str, golden_source: &str) {
     let ir: ModelIr = serde_json::from_str(preset_source).expect("preset must deserialize");
     let model = compile(&ir).expect("preset must compile");
-    let result =
-        run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).expect("preset DP must run");
+    let result = run_dp(
+        &model,
+        DpOptions {
+            prune_log10: None,
+            ..Default::default()
+        },
+        |_, _| true,
+    )
+    .expect("preset DP must run");
     let DpRunResult::Approximate(result) = result else {
         panic!("golden presets must use approximate DP");
     };
@@ -208,8 +215,19 @@ fn arknights_first_ten_guarantee_invariants_hold() {
         .iter()
         .map(|cell| cell.counts[star6] as f64 * cell.probability)
         .sum::<f64>();
+    // The first-ten guarantee must not change the 6-star expectation: 10 pulls × base 2%.
     assert!(
-        (expected_star6 - 0.269_735_688_02).abs() < 1e-12,
-        "Arknights first-ten guarantee broke: E[6-star]={expected_star6:.14}, expected 0.26973568802",
+        (expected_star6 - 0.2).abs() < 1e-12,
+        "Arknights first-ten guarantee broke: E[6-star]={expected_star6:.14}, expected 0.2",
+    );
+
+    let expected_star5 = result
+        .joint
+        .iter()
+        .map(|cell| cell.counts[star5] as f64 * cell.probability)
+        .sum::<f64>();
+    assert!(
+        (expected_star5 - 1.148_678_440_1).abs() < 1e-12,
+        "Arknights first-ten guarantee broke: E[5-star]={expected_star5:.14}, expected 1.1486784401",
     );
 }

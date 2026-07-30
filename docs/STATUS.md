@@ -486,3 +486,306 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   모델 해시 `944d046c527df830889a72b6dc47ffb5540d279b6d41b09a934950830e53a73f`로
   완료되는 것을 확인했다. 375px에서 `clientWidth=360`,
   `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.
+
+## 2026-07-29 UI 정리 — 미지원 규칙 안내와 출처 배지
+
+- 블록 밖 규칙 안내는 규칙이 그대로 보존된다는 사실을 먼저 알리는 중립 정보
+  팔레트로 바꿨다. 4건 이상이면 경로 목록만 닫힌 `details`에 넣고 개수·보존
+  설명·IR JSON 이동 버튼은 항상 보이게 했다. `role="status"`는 유지했다.
+- 출처 confidence 세 값은 `공식 공시`, `데이터마이닝`, `커뮤니티 추정`으로
+  한국어화했다. 배지의 `title`에는 원문을 유지하고 등록되지 않은 미래 값은
+  원문 그대로 표시한다. `presets/`의 실제 confidence를 전부 순회해 라벨 누락을
+  막는 테스트를 추가했다.
+- 실제 프로덕션 미리보기에서 Arknights는 접힌 안내가 5건을 보고하고 펼치면
+  `probRules[0..3]`, `transitions[0]`이 모두 보였다. Blue Archive와
+  simple-pity에는 안내가 없었다. 배지는 각각 `공식 공시`, `커뮤니티 추정`으로
+  표시됐다. 375px에서 `innerWidth=375`, `clientWidth=360`,
+  `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.
+- `cargo test --workspace --exclude gacha-tauri`는 Rust 55/55를 117.1초에
+  통과했고 세 프리셋 골든과 Arknights 불변식도 그대로다. UI strict 타입 검사,
+  8개 파일의 26/26 테스트, 1,603개 모듈의 프로덕션 빌드가 통과했다.
+- 출처 이탈 추적은 조사만 하고 구현하지 않았다. 현재 `selectedPreset`은 모델과
+  독립이라 저장 모델을 복구하면 선택기는 Blue Archive인데 내용은 Arknights인
+  상태도 재현된다. 최소 변경안은 `loadPreset`만 provenance를 pristine으로
+  설정하고 Blockly 리스너, JSON 적용, 파일 열기, 결과 탭의 run 변경을 하나의
+  dirty 경로로 모으는 것이다. 이탈 후에는 배지를 숨기기보다 `수정됨`으로 표시하고,
+  저장 시 사실이 아닌 출처가 전파되지 않도록 `$preset`을 제거하는 편이 안전하다.
+  프로그램식 `loadIr` 이벤트와 localStorage 복구의 초기 provenance까지 함께
+  다뤄야 하므로 별도 작업으로 남겼다.
+
+## 2026-07-29 Arknights 보장 슬롯 가정 정정
+
+- 첫 10회에 5★·6★가 없을 때 10번째 슬롯을 기본 비율로 재분배한 6★ 20% /
+  5★ 80%에서, 6★는 기본 2%를 유지하고 3★·4★ 몫을 모두 흡수한 5★가 98%를
+  갖는 모델로 정정했다. 조건식·`highSeen` 제어 변수·IR 구조는 바꾸지 않았다.
+- 이전 20/80은 출처 없는 2:8 비례 재분배 추측이었다. 새 해석은 실효 6★ 약 3%를
+  소프트 천장에 귀속한 위키 서술, 10연 보장이 6★ 확률을 높인다는 언급이 없는 점,
+  6★ 확률이 100%이면 남은 5★가 0%가 되는 극단 구조에 더 잘 맞는다. 다만 게임 내
+  확률 공시로 확인된 것은 아니므로 confidence는 `community-estimate`를 유지한다.
+- 프리셋 notes에는 채택 근거와 함께 기각한 20/80 대안의
+  `E[6★]=0.269735688`, 보장이 매 10연인지 최초 10연 1회인지와 이벤트 보상
+  형태인지가 미확인이라는 점을 남겼다. `maxTrials=10` 전용과 50회 이후 소프트
+  천장 미포함 범위도 유지했다. 단정적이던 Standard Headhunting 이름은
+  `10연 5★ 이상 보장`으로 바꿨다.
+- Exact 실측은 275셀, `E[6★]=0.20000000000000004`,
+  `E[5★]=1.1486784400999994`, 기대 counts 합 10,
+  `P(5★도 6★도 없음)=0`, counts 합이 10이 아닌 셀 0개였다. 모델 해시는
+  `8728d8938924a9e4655a49cfbdcf341dc17932f3a56927aeb5dc041f65950a20`다.
+- 새 골든의 preset SHA-256은
+  `babb4755f02a8d31ae9710d9e2e47fd77c5586341dbaeb346890c425a39545ea`,
+  result SHA-256은
+  `ba04a45e0fd1ac542772f8cc8781442c825e884436fab75a94ad23990334866f`다.
+  `jointCells=275`를 유지했고 `simple-pity`, `blue-archive-pickup` 골든은
+  변경 없이 통과했다.
+- `cargo test --workspace --exclude gacha-tauri`는 Rust 55/55를 105초에
+  통과했다. UI strict 타입 검사, 8개 파일의 26/26 테스트, 1,603개 모듈의
+  프로덕션 빌드도 통과했다.
+- 실제 프로덕션 미리보기에서 새 프리셋 이름과 배지, Exact 275셀·7ms,
+  6★ 추이 최댓값 0.2를 확인했다. 375px에서 `innerWidth=375`,
+  `clientWidth=360`, `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.
+
+## 2026-07-30 BACKLOG A — 출처 이탈 추적
+
+- 모델 provenance를 `pristine`·`dirty`·`none` 세 값으로 중앙화했다. 프리셋
+  로드만 pristine으로 만들고, Blockly 변경·JSON 적용·결과 탭 모델 변경은
+  프리셋에서 시작한 모델을 dirty로 만든다. 파일 열기와 localStorage 복구는
+  출처 대조 없이 none으로 둔다.
+- pristine 배지는 기존 출처 라벨을 유지하고 dirty는 `수정됨`을 함께 표시한다.
+  none은 배지를 숨기고 선택기에 `현재 모델 · 출처 없음`을 표시해 기본 Blue Archive
+  선택기가 다른 저장 모델의 출처처럼 보이던 문제를 막았다.
+- 저장 시 pristine이 아니면 복제본에서 `$preset`을 제거한다. 원본 모델은 변경하지
+  않으며 pristine 내보내기만 출처 메타데이터를 유지한다. 여섯 진입·변경 이벤트와
+  세 provenance의 내보내기를 순수 함수 테스트로 고정했다.
+- 실제 프로덕션 미리보기에서 Arknights 로드 직후에는 `커뮤니티 추정`,
+  JSON 적용과 시행 횟수 변경 뒤에는 `커뮤니티 추정 · 수정됨`을 확인했다.
+  새로고침 뒤 모델명은 Arknights로 유지되면서 선택기는 `현재 모델 · 출처 없음`,
+  출처 배지는 미표시였다. 프로그램식 프리셋 로드는 dirty를 유발하지 않았다.
+- `cargo test --workspace --exclude gacha-tauri`는 Rust 55/55를 100.4초에
+  통과했고 세 프리셋 골든은 불변이다. UI strict 타입 검사, 9개 파일의
+  28/28 테스트, 1,604개 모듈의 프로덕션 빌드가 통과했다. 375px에서
+  `innerWidth=375`, `clientWidth=360`, `scrollWidth=360`이었고 브라우저
+  개발자 로그는 0건이었다.
+
+## 2026-07-30 BACKLOG B — 블록 커버리지 확장
+
+- `N회이고 상태 변수가 K이면` 형태의 시행 조건부 확률 규칙을 전용 블록으로
+  추가했다. 대상·시행 횟수·상태 변수·비교값·조건 참/거짓 확률을 편집할 수 있고,
+  IR의 `if.and`와 두 `eq` 표현식으로 손실 없이 왕복한다.
+- 두 결과 중 하나가 나왔을 때 상태를 대입하거나 증가시키는 `or` 전이 블록을
+  추가했다. 기존 soft-pity와 단일/부정 전이 블록은 그대로 유지했다.
+- Arknights 프리셋에서 시행 조건부 확률 블록 4개와 `or` 전이 블록 1개가
+  생성되며 `loadIr` 미지원 항목은 5건에서 0건으로 줄었다. 세 프리셋의
+  `loadIr → workspaceToIr` 원문 왕복 단언은 유지했다.
+- UI strict 타입 검사, 9개 파일의 29/29 테스트, 1,604개 모듈의 프로덕션
+  빌드가 통과했다. Rust 55/55와 Arknights를 포함한 세 프리셋 골든이 모두
+  통과해 계산 결과는 불변이다.
+- 실제 프로덕션 미리보기에서 Arknights 선택 시 미지원 안내가 0건이고,
+  `회이고` 블록 4개와 `또는` 전이 블록 1개가 렌더링되는 것을 확인했다.
+  375px에서 `innerWidth=375`, `clientWidth=360`, `scrollWidth=360`이었고
+  브라우저 개발자 로그는 0건이었다.
+
+## 2026-07-30 BACKLOG C — UI 유지보수
+
+- Vitest를 2.1.9에서 4.1.10으로 올리고 lockfile에서 취약한 중첩
+  Vite/esbuild 의존성을 제거했다. clean `npm ci` 뒤 `npm audit`은 취약점
+  0건이고, `import.meta.glob`을 쓰는 Blockly·라벨 테스트를 포함해 9개 파일의
+  29/29 테스트가 Vitest 4에서 통과했다.
+- 모바일 안내 여부를 TS의 별도 `620px` 미디어 쿼리로 판단하지 않고, CSS의
+  단일 미디어 쿼리가 설정하는 `--gacha-mobile-layout` 플래그를 읽도록 바꿨다.
+  따라서 grid track 높이 `620px`은 그대로 유지하면서 반응형 기준 숫자의
+  중복을 없앴다.
+- UI strict 타입 검사와 1,604개 모듈의 프로덕션 빌드가 통과했다. 실제
+  브라우저에서 데스크톱 안내 0건, 375px의 CSS 플래그 `1`과 안내 1건,
+  닫은 뒤 새로고침 시 안내 0건을 확인했다. 375px에서 `innerWidth=375`,
+  `clientWidth=360`, `scrollWidth=360`이었고 브라우저 개발자 로그는 0건이었다.
+
+## 2026-07-30 BACKLOG D — 구현 전 조사
+
+### MC 다중 Web Worker
+
+- 결론은 **고정 스트림 단위로 분할하면 착수 가능, UI에서 runs만 나누는 구현은
+  불가**다. 현재 코어는 4,096 run마다 스트림 번호를 부여하고 기본 시드에서
+  `jump()`한 RNG를 그 번호에 고정한다. 따라서 워커 수가 아니라 스트림 번호가
+  결과를 결정하도록 코어에 shard API를 만들면 같은 시드·run 수의 정수
+  히스토그램은 워커 수와 무관하게 같아진다.
+- 기존 native Rayon 경로도 같은 스트림 배열을 스레드에 나눈다.
+  `parallel_mc_is_reproducible_across_thread_counts`를 별도로 실행해 1스레드와
+  4스레드의 joint occurrences·first-hit·seed가 일치하는 단언이 통과함을
+  확인했다. 반대로 현재 WASM `run_mc_json`을 여러 워커에서 단순 호출하면 각
+  워커가 스트림 0부터 다시 시작하므로 중복 샘플이 생기며 이 방식은 금지해야 한다.
+- 구현 시 core/WASM이 `totalRuns`, base `seed`, 고정 stream 범위를 받는 partial
+  결과와 중앙 finalizer를 제공해야 한다. joint·first-hit·marginal·checkpoint의
+  정수 occurrences와 accumulator clamp 횟수는 합산하고, model hash·tracked
+  leaf·trial-series mode는 전 shard가 같은지 검증한다. 결과 순서는 기존처럼
+  정렬된 키로 확정한다.
+- Wilson 구간은 shard별 구간을 합치지 않고, 합산한 occurrences와 전역
+  `actualRuns`로 마지막에 한 번 계산한다. 결과의 seed는 base seed를 그대로
+  기록하므로 절대 규칙 6을 유지할 수 있다.
+- MC에는 프루닝 자체와 `prunedMass` 필드가 없어 프루닝 손실 합산은 해당 없음이다.
+  `clampEvents`는 모델 확률표의 정적 값이라 shard별로 같은지 확인한 뒤 한 번만
+  취하고, `accumulatorClampEvents`만 합산해야 한다. 둘을 모두 합산하면 정적
+  clamp가 워커 수만큼 부풀어 절대 규칙 8을 어긴다.
+- 진행률은 shard 완료 run의 합으로 보고하고, 취소 시 모든 워커를 종료하면서
+  partial 결과를 폐기해야 한다. DP·Exact는 대상에서 제외한다. SharedArrayBuffer와
+  COOP/COEP는 필요 없다. 권고는 core partial/finalizer와 재현성 테스트를 먼저,
+  WASM/프로토콜을 다음, 워커 풀·취소·실브라우저 성능 측정을 마지막 PR로 나누는
+  것이다. 이 조사에서는 구현하지 않았다.
+
+### Tauri 인스톨러
+
+- 현재 `bundle.active=false`이고 Windows x64의 단일 exe만 로컬 빌드가 확인된
+  상태다. 첫 대상은 **Windows x64 NSIS 설치 프로그램**을 권고한다. 기존
+  `icon.ico`와 Windows 실행 검증을 재사용할 수 있고, MSI에만 필요한 VBSCRIPT
+  선택 기능을 피할 수 있다. macOS와 Linux용 표준 아이콘 자산과 설치 실측은
+  아직 없다.
+- GitHub-hosted `windows-latest`에서 Rust·Node를 설치하고 `npm ci` 후 Tauri
+  build를 실행하는 build-only CI는 가능하다. 공식 `tauri-action`은 Windows,
+  macOS, Linux 빌드와 workflow artifact 업로드를 지원하며, release 관련 입력을
+  생략하면 GitHub Release를 만들지 않는다. Linux x64는 WebKitGTK 등 현재 CI에
+  없는 패키지를 설치해야 하고, macOS Intel/ARM은 macOS runner와 각 target이
+  필요하다.
+- Windows 서명은 실행 자체에는 필수가 아니지만 브라우저 다운로드의 SmartScreen
+  경고를 피하고 Microsoft Store에 올리려면 필요하다. 공개 배포 전 인증서 또는
+  Azure Artifact Signing 방식을 소유자가 선택해야 한다. macOS 공개 배포는 Apple
+  코드 서명이 필요하고, App Store 밖 DMG도 notarization이 필요하다. Linux
+  AppImage 서명은 별도 GPG 절차다.
+- 1단계는 unsigned Windows NSIS를 **workflow artifact로만** 만들어 설치 smoke
+  test에 쓰고, 2단계 공개 배포는 서명 방식을 정한 뒤 별도 승인하는 것이 안전하다.
+  현재 CI의 `contents: read`를 유지할 수 있다. GitHub Release 생성·asset 업로드는
+  `contents: write`, 태그/버전 정책, 공개·draft 여부가 필요하므로 이번 범위에서는
+  만들지 않는다.
+- 구현 전 소유자 결정 사항은 (1) Windows x64 NSIS 우선 여부, (2) 공개 전에 쓸
+  Windows 서명 수단, (3) workflow artifact만 만들지 draft GitHub Release까지
+  만들지, (4) macOS/Linux를 같은 M10에 포함할지다.
+- 확인한 공식 자료:
+  [Tauri GitHub 파이프라인](https://v2.tauri.app/distribute/pipelines/github/),
+  [tauri-action](https://github.com/tauri-apps/tauri-action),
+  [Windows 설치 프로그램](https://v2.tauri.app/distribute/windows-installer/),
+  [Windows 코드 서명](https://v2.tauri.app/distribute/sign/windows/),
+  [macOS 코드 서명](https://v2.tauri.app/distribute/sign/macos/),
+  [Tauri 사전 요구사항](https://v2.tauri.app/start/prerequisites/).
+
+## 2026-07-30 LIVE A — 저장소 실패 복구
+
+- 모델과 설정의 `localStorage.setItem` 예외를 흡수해 저장소 차단·용량 초과가
+  현재 편집과 계산을 중단하지 않게 했다. 모델·설정 읽기 경로도 예외와 손상 JSON
+  모두 기본값으로 복구함을 테스트로 고정했다.
+- 최상위 React error boundary를 추가했다. 오류가 발생하면 한국어 안내,
+  새로고침, `gacha-lab.model.v2` 저장 모델 삭제 후 재시작, 접이식 원본 오류
+  메시지를 제공한다. 저장소 삭제 자체가 실패해도 새로고침은 수행한다.
+- 실제 프로덕션 미리보기에서 `Storage.prototype.setItem`이 항상
+  `QuotaExceededError`를 던지도록 한 뒤 Arknights 프리셋 전환(루트
+  57,719자), 블록 필드 수정(57,798자), IR JSON 적용(62,624자)을 순서대로
+  수행했고 앱이 계속 동작했다. 정상 저장소에서는 simple-pity 모델을 저장한 뒤
+  새로고침해 `90회 하드 천장` 모델이 복구됐다.
+- 임시 오류 컴포넌트로 경계 화면과 원본 메시지를 확인하고 임시 코드를 제거했다.
+  `저장된 모델 지우고 다시 시작`을 누른 뒤 기본 Blue Archive 모델로 복귀하는
+  것까지 확인했다.
+- `npx tsc --noEmit`, 10개 파일의 UI 33/33 테스트, 1,606개 모듈의 프로덕션
+  빌드가 통과했다. `cargo test --workspace`는 core 55/55와 Tauri 어댑터 2/2를 포함해
+  전부 통과했고 세 프리셋 골든도 불변이다. 실제 브라우저의 정상 경로 콘솔 오류는
+  0건이었으며 375px에서 `innerWidth=375`, `body.scrollWidth=360`이었다.
+
+## 2026-07-30 LIVE B — 근사 DP 런타임 상한
+
+- 상한을 정하기 전에 `$env:GACHA_REPORT_DP_PEAKS='1'; cargo test -p
+  gacha-core -- --nocapture`로 기존 approximate DP를 계측했다. 최대는 지급 전파·중첩 검증의
+  20,301 상태였고 simple-pity 프리셋은 1 상태였다. 기존 exact 프리셋 peak는
+  Blue Archive 20,301, Arknights 275다.
+- `DpOptions.max_layer_states`의 웹 기본값을 1,000,000으로 정했다. 기존 최대의
+  약 49배다. `u64 + ScaledF64` 원시 키·값이 24바이트이고 해시맵 여유 공간,
+  source 벡터, 병렬 부분 레이어와 다음 레이어가 겹치는 점을 반영하면 대략
+  100~200MB 범위에서 중단하므로 브라우저 OOM 전 방어선이 되면서 정상 모델에는
+  충분한 여유가 있다. CLI와 스냅샷 명령은 `--max-layer-states`로 높일 수 있다.
+- 근사 DP는 프루닝 뒤 실제 레이어 상태 수가 상한을 넘으면 부분 결과를 만들지
+  않고 `E011`을 반환한다. 진행 콜백으로 우회하지 않는 회귀 테스트는 10개
+  상한에서 실제 11개가 된 시점에 마지막 진행률 9를 남기고 오류가 반환됨을
+  확인한다. 성공 결과에는 `peakStates`를 기록하고 UI 결과 헤더에도 표시한다.
+- UI의 50,000,000 추정 상태 하드 한도를 코어
+  `DP_ESTIMATED_STATE_LIMIT`와 상호 참조했다. 초과한 `W004`를 error로 올려
+  실행을 막고, W004/E011 도움말에는 시행 횟수·추적 대상 축소와 MC 전환을
+  명시했다.
+- release CLI의 500회·4축 균등 모델은 `validate`에서
+  `dpAvailable=false`, `totalStates=63,001,502,001`이었다. `dp`는
+  43,793ms 뒤 `E011: actual=1,001,236, limit=1,000,000`으로 종료했고,
+  `--max-layer-states 100` 재실행은 실제 147개에서 즉시 사용자 상한을 적용했다.
+- 실제 프로덕션 브라우저에서 같은 500회 모델은 W004와 50,000,000 한도를
+  표시하며 실행 전에 차단됐다. 별도로 UI 추정 22,698,100으로 사전 검사를
+  통과하는 60회·제어상태 100 모델은 WASM 실행 2,910ms 뒤
+  `E011: actual=1,040,230, limit=1,000,000`과 한국어 해결 방법을 표시했고
+  탭은 정상 동작했다. 실행 중 진행률과 취소 버튼, 취소 뒤 오류가 남지 않는
+  것도 확인했다.
+- `cargo test --workspace --exclude gacha-tauri`는 core 56/56을 통과했고
+  세 프리셋 `resultSha256`는 모두 불변이다. `npx tsc --noEmit`, 10개 파일의
+  UI 34/34 테스트, 1,606개 모듈의 프로덕션 빌드도 통과했다. 최종 번들의
+  브라우저 콘솔 오류는 0건이었고 375px에서 `innerWidth=375`,
+  `clientWidth=360`, `scrollWidth=360`이었다.
+
+## 2026-07-30 LIVE C — Worker 사망 감지 판단
+
+- 구현하지 않았다. B의 사전·런타임 방어선으로 확인된 OOM 경로가 차단됐고
+  실제 진행률·취소도 정상이다. Worker 무응답 판정은 정당하게 오래 걸리는
+  계산과 구분할 heartbeat 설계가 필요하며 계획서도 별도 PR을 요구한다.
+  B와 섞지 않고 실제 무응답 사례가 남을 때 독립 작업으로 진행한다.
+
+## 2026-07-30 DP 상한 후속 — 확률표 사전계산 방어
+
+- UI 추정 상태 수가 1,000,000을 넘으면 `W004` warning, 50,000,000을 넘으면
+  `E011` error가 되도록 진단 규약과 임계값을 맞췄다. 세 번들 프리셋은 모두
+  `W004`/`E011` 없이 기존 범위에 남는다.
+- 확률표는 500,000 엔트리부터 `W010`, 10,000,000 초과 시 `E012`를 내며,
+  하드 오류에서는 하위 경고나 표 할당으로 진행하지 않는다. 엔트리 수는
+  제어 상태 × 시행 × 리프 축을 함께 보고한다.
+- 초기 제어값에서 실제 시행 순서의 모든 리프 전이와 트리거 대입·지급 전이를
+  따라 도달 가능한 제어 상태를 구하고, 선언 상태 인덱스를 조밀한 확률·전이
+  테이블 인덱스로 매핑한다. 수렴한 시행 비의존 전이는 조기 종료한다. lazy
+  평가는 추가하지 않아 엔진 내부 루프가 계속 완전 사전계산 표만 조회한다.
+- 지시서의 12,007,001 선언 제어 상태(`max` 3000 × 4000,
+  `transitions: []`, 두 제어 변수를 참조하는 확률식) 모델은 1차 하드 가드에서
+  `target/release/gacha-cli validate .tmp-prob-table.json` 147ms 만에
+  24,014,002 엔트리 `E012`로 종료했다. 도달 제한 후 같은 명령의 워밍 측정
+  5회는 26.7/7.8/7.4/7.0/7.1ms(최소 7.0ms, 평균 11.2ms)였고,
+  `controlStates=1`, `totalStates=3`, `dpAvailable=true`였다.
+  `gacha-cli dp`는 peak 3, 확률 0.25/0.5/0.25로 완료했다. 기존 보고의
+  무방어 기준값은 26,040ms였다.
+- `cargo test --workspace --exclude gacha-tauri`는 core 61/61을 포함해
+  전부 통과했다. Blue Archive, Arknights, simple-pity의 `resultSha256`
+  3개가 모두 불변이며, 전 구간을 도는 simple-pity도 같은 골든을 유지했다.
+  `npx tsc --noEmit`, 10개 파일의 UI 37/37 테스트와 `npm run build`
+  (1,606 모듈)도 통과했다.
+- 현재 코어로 `wasm-pack build crates/gacha-wasm --target web --out-dir
+  ../../ui/public/wasm`을 실행한 뒤 프로덕션 프리뷰를 확인했다. UI에서
+  12,007,001 선언 상태의 동등한 두-제어 확률 규칙 모델은 1ms, 3개 결과 셀,
+  peak 3으로 완료됐다. 별도 11리프 × 1,000,001시행 모델은 탭 중단 없이
+  `E012 · 확률표 한도 초과`와 모든 축을 포함한 한국어 해결 방법을 표시했다.
+  콘솔 오류는 0건이었다. 375px에서 `innerWidth=375`,
+  `clientWidth=360`, `scrollWidth=360`, `body.scrollWidth=360`으로
+  가로 넘침이 없었다.
+
+## 2026-07-30 DP 도달 상태 회귀 수정
+
+- 시행 비의존 전이가 수렴한 뒤 다음 트리거 시행으로 점프할 때 프런티어만
+  유지해, 자기 루프가 없는 순환 전이의 일부 상태가 트리거 입력에서 빠지는
+  회귀를 수정했다. 점프 시 누적 도달 집합 전체를 트리거 입력 상위집합으로
+  전개해 확률표가 런타임 제어 상태를 빠뜨리지 않는다.
+- 기존 프리셋에는 `transitions`와 `triggers`를 함께 쓰는 모델이 없었다.
+  simple-pity와 Arknights는 전이만 있고, Blue Archive는 트리거만 있으며
+  제어 변수가 없다. 기존 도달 회귀 테스트도 시행이 2회이거나 전이가 없어
+  수렴 뒤 트리거 점프 분기를 통과하지 않았다.
+- parity 2주기와 6번째 시행 트리거를 결합한 회귀 테스트를 추가했다.
+  수정 한 줄을 제거한 변이에서는 `controlStates=2`로 컴파일된 뒤
+  `compile.rs:222`의 `runtime control state must be present in the probability
+  table` 패닉으로 실패했다. 수정 후 `controlStates=4`, 확률표 키
+  `[0, 1, 2, 3]`이며 DP는 `P(a=0)=0.0263671875`,
+  `P(a=7)=0.0009765625`로 완료했다.
+- 도달 탐색이 확률표 하드 상한에서 조기 중단된 `E012`는 발견된 제어 상태와
+  엔트리 수를 `at least`, `control>=...`, `entries>=...`로 표시한다.
+  끝까지 계산한 `W010`/`E012`는 기존처럼 정확한 개수를 표시한다.
+- `cargo test --workspace --exclude gacha-tauri`는 core 62/62를 포함해
+  전부 통과했다. Blue Archive, Arknights, simple-pity의 `resultSha256`
+  3개와 Arknights 불변식이 그대로이며, `npx tsc --noEmit`, UI 37/37
+  테스트와 1,606개 모듈의 프로덕션 빌드도 통과했다.
+- 현재 코어로 WASM을 다시 빌드한 프로덕션 프리뷰에서 같은 전이·트리거와
+  동등한 `probRules` 확률식을 사용한 모델은 `controlStates=4`, 8개 결과 셀,
+  peak 8 상태로 3ms에 완료됐다. 양끝 확률은 CLI와 같고 브라우저 콘솔 오류는
+  0건이었다.

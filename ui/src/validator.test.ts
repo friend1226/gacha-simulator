@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blueArchive } from "./preset";
+import { blueArchive, presets } from "./preset";
 import { parseExactLiteral, validateLocally } from "./validator";
 import type { ModelIr } from "./types";
 
@@ -33,6 +33,62 @@ describe("accumulator table preflight", () => {
     expect(error.some((item) => item.code === "W009")).toBe(false);
   });
 });
+
+describe("DP state-space preflight", () => {
+  it("warns above the runtime layer limit without blocking execution", () => {
+    const diagnostics = validateLocally(largeDpModel(180)).diagnostics;
+    expect(diagnostics.find((item) => item.code === "W004")).toEqual(expect.objectContaining({
+      severity: "warning",
+      message: expect.stringContaining("1,000,000"),
+    }));
+    expect(diagnostics.some((item) => item.code === "E011")).toBe(false);
+  });
+
+  it("blocks execution above the core estimated-state hard limit", () => {
+    const diagnostics = validateLocally(largeDpModel(500)).diagnostics;
+    expect(diagnostics.find((item) => item.code === "E011")).toEqual(expect.objectContaining({
+      severity: "error",
+      message: expect.stringContaining("50,000,000"),
+    }));
+    expect(diagnostics.some((item) => item.code === "W004")).toBe(false);
+  });
+});
+
+describe("preset DP preflight", () => {
+  it("keeps every bundled preset below the W004 warning threshold", () => {
+    for (const preset of presets) {
+      const diagnostics = validateLocally(preset.model).diagnostics;
+      expect(
+        diagnostics.some((item) => item.code === "W004" || item.code === "E011"),
+        preset.id,
+      ).toBe(false);
+    }
+  });
+});
+
+function largeDpModel(maxTrials: number): ModelIr {
+  return {
+    irVersion: 2,
+    name: "large DP",
+    entities: [
+      { id: "a", name: "A", prob: { lit: "1/4" } },
+      { id: "b", name: "B", prob: { lit: "1/4" } },
+      { id: "c", name: "C", prob: { lit: "1/4" } },
+      { id: "d", name: "D", prob: { lit: "1/4" } },
+    ],
+    nestingPolicy: "clampChildren",
+    stateVars: [],
+    probRules: [],
+    transitions: [],
+    triggers: [],
+    run: {
+      maxTrials,
+      trackJoint: ["a", "b", "c", "d"],
+      numeric: "scaled",
+      trialSeries: "none",
+    },
+  };
+}
 
 function largeAccumulatorModel(max: number, maxTrials: number): ModelIr {
   return {
