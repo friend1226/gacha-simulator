@@ -52,6 +52,8 @@ pub struct LeafProbs {
 pub struct ProbTable {
     pub entries: Vec<Vec<LeafProbs>>,
     pub trial_dependent: bool,
+    pub entry_control_invariant: bool,
+    pub control_entry_indices: BTreeMap<usize, usize>,
     pub control_invariant: bool,
     pub clamp_events: u64,
 }
@@ -78,6 +80,8 @@ pub struct AccumulatorTable {
 
 const ACCUMULATOR_TABLE_WARNING_ENTRIES: u128 = 500_000;
 const ACCUMULATOR_TABLE_MAX_ENTRIES: u128 = 10_000_000;
+const PROBABILITY_TABLE_WARNING_ENTRIES: u128 = 500_000;
+const PROBABILITY_TABLE_MAX_ENTRIES: u128 = 10_000_000;
 pub const DP_CONTROL_STATE_LIMIT: u64 = 10_000_000;
 pub const DP_ESTIMATED_STATE_LIMIT: u64 = 50_000_000;
 
@@ -195,12 +199,27 @@ impl CompiledModel {
 
     pub fn probabilities(&self, control: &[u32], trial: u32) -> &LeafProbs {
         let ci = self.control_index(control);
+        let ci = self.probability_table_index(ci);
         let ti = if self.prob_table.trial_dependent {
             trial.saturating_sub(1) as usize
         } else {
             0
         };
         &self.prob_table.entries[ci][ti]
+    }
+
+    pub fn probability_table_index(&self, control_index: usize) -> usize {
+        if self.prob_table.entry_control_invariant {
+            0
+        } else if self.prob_table.control_entry_indices.is_empty() {
+            control_index
+        } else {
+            *self
+                .prob_table
+                .control_entry_indices
+                .get(&control_index)
+                .expect("runtime control state must be present in the probability table")
+        }
     }
 
     pub fn apply_transitions(&self, control: &mut [u32], leaf: usize, trial: u32) {
@@ -691,26 +710,57 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     let control_states = control_max
         .iter()
         .fold(1u64, |n, max| n.saturating_mul(*max as u64 + 1));
-    if control_states > DP_CONTROL_STATE_LIMIT {
-        diagnostics.push(warning(
-            "W004",
-            format!("control space {control_states} exceeds precompute limit"),
-            None,
-        ));
-    }
     if diagnostics.iter().any(|d| d.severity == Severity::Error) {
         return Err(CompileError { diagnostics });
     }
 
     let trial_dependent = entity_defs.iter().any(entity_trial_dependent);
+    let probability_control_dependent = entity_defs_control_dependent(&entity_defs, &control_ids);
     let table_trials = if trial_dependent {
         ir.run.max_trials.max(1)
     } else {
         1
     };
-    let mut entries = Vec::with_capacity(control_states as usize);
+    let probability_table_controls = if probability_control_dependent {
+        control_states
+    } else {
+        1
+    };
+    let probability_table_entries = u128::from(probability_table_controls)
+        .saturating_mul(u128::from(table_trials))
+        .saturating_mul(leaves.len() as u128);
+    let probability_table_axes = format!(
+        "control={probability_table_controls}, trials={table_trials}, leaves={}, entries={probability_table_entries}",
+        leaves.len(),
+    );
+    if probability_table_entries > PROBABILITY_TABLE_MAX_ENTRIES {
+        diagnostics.push(error(
+            "E012",
+            format!(
+                "probability precompute table requires {probability_table_entries} entries, exceeding hard limit {PROBABILITY_TABLE_MAX_ENTRIES}; axes: {probability_table_axes}; reduce control max or remove control variable references from probability expressions"
+            ),
+            None,
+        ));
+        return Err(CompileError { diagnostics });
+    }
+    if probability_table_entries >= PROBABILITY_TABLE_WARNING_ENTRIES {
+        diagnostics.push(warning(
+            "W010",
+            format!(
+                "probability precompute table requires {probability_table_entries} entries; axes: {probability_table_axes}; reduce control max or remove control variable references from probability expressions"
+            ),
+            None,
+        ));
+    }
+
+    let probability_control_indices: Vec<u64> = if probability_control_dependent {
+        (0..control_states).collect()
+    } else {
+        vec![encode_control(&control_init, &control_max) as u64]
+    };
+    let mut entries = Vec::with_capacity(probability_control_indices.len());
     let mut clamp_events = 0u64;
-    for ci in 0..control_states {
+    for ci in probability_control_indices {
         let control = decode_control(ci, &control_max);
         let mut by_trial = Vec::with_capacity(table_trials as usize);
         for trial in 1..=table_trials {
@@ -753,6 +803,9 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
                     .all(|(left, right)| left.exact == right.exact)
         })
     });
+    if probability_control_invariant {
+        entries.truncate(1);
+    }
 
     let leaf_lookup: HashMap<_, _> = leaves
         .iter()
@@ -996,6 +1049,8 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         prob_table: ProbTable {
             entries,
             trial_dependent,
+            entry_control_invariant: probability_control_invariant,
+            control_entry_indices: BTreeMap::new(),
             control_invariant,
             clamp_events,
         },
@@ -1549,6 +1604,17 @@ fn compile_entities(
 
 fn entity_trial_dependent(entity: &EntityDef) -> bool {
     entity.program.trial_dependent || entity.children.iter().any(entity_trial_dependent)
+}
+
+fn entity_defs_control_dependent(entities: &[EntityDef], control_ids: &[String]) -> bool {
+    entities.iter().any(|entity| {
+        entity
+            .program
+            .ops
+            .iter()
+            .any(|op| matches!(op, Op::PushVar(name) if control_ids.contains(name)))
+            || entity_defs_control_dependent(&entity.children, control_ids)
+    })
 }
 
 fn calculate_leaf_probs(

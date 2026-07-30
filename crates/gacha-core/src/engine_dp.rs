@@ -447,13 +447,14 @@ fn expand_chunk<P: Prob>(
     let mut accumulator_clamps = 0u64;
     for (state, mass) in source {
         let ci = codec.control_index(*state);
+        let probability_ci = model.probability_table_index(ci);
         codec.decode_full_into(
             *state,
             &mut base_control,
             &mut base_accumulators,
             &mut base_counts,
         );
-        for (leaf, p_leaf) in converted[ci][ti].iter().enumerate() {
+        for (leaf, p_leaf) in converted[probability_ci][ti].iter().enumerate() {
             if p_leaf.is_zero() {
                 continue;
             }
@@ -537,7 +538,8 @@ fn expand_packed_chunk<P: Prob>(
     let mut accumulator_clamps = 0u64;
     for (state, mass) in source {
         let control_index = codec.control_index(*state);
-        for (leaf, probability) in converted[control_index][probability_trial]
+        let probability_control_index = model.probability_table_index(control_index);
+        for (leaf, probability) in converted[probability_control_index][probability_trial]
             .iter()
             .enumerate()
         {

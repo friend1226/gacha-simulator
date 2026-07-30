@@ -180,3 +180,93 @@ fn w003_does_not_warn_when_a_grant_can_satisfy_a_zero_probability_condition() {
         .iter()
         .any(|diagnostic| diagnostic.code == "W003"));
 }
+
+fn probability_table_model(max_a: u32, max_b: u32, probability: Value) -> ModelIr {
+    serde_json::from_value(json!({
+        "irVersion": 1,
+        "name": "probability table diagnostic model",
+        "entities": [{"id": "hit", "name": "hit", "prob": probability}],
+        "stateVars": [
+            {"id": "a", "init": 0, "max": max_a, "role": "control"},
+            {"id": "b", "init": 0, "max": max_b, "role": "control"}
+        ],
+        "probRules": [],
+        "transitions": [],
+        "triggers": [],
+        "run": {
+            "maxTrials": 2,
+            "trackJoint": ["hit"],
+            "numeric": "scaled",
+            "trialSeries": "none"
+        }
+    }))
+    .expect("probability table diagnostic IR must deserialize")
+}
+
+fn two_control_probability() -> Value {
+    json!({
+        "add": [
+            {"lit": "1/2"},
+            {"mul": [
+                {"lit": "0"},
+                {"add": [{"var": "a"}, {"var": "b"}]}
+            ]}
+        ]
+    })
+}
+
+#[test]
+fn probability_table_preflight_warns_and_rejects_before_expansion() {
+    let warning_model = compile(&probability_table_model(
+        700,
+        400,
+        two_control_probability(),
+    ))
+    .expect("562K probability entries must remain below the hard limit");
+    let warning = warning_model
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "W010")
+        .expect("large probability tables must warn");
+    assert!(warning.message.contains("562202"));
+    assert!(warning.message.contains("control=281101"));
+    assert!(warning.message.contains("trials=1"));
+    assert!(warning.message.contains("leaves=2"));
+
+    let error = compile(&probability_table_model(
+        3_000,
+        4_000,
+        two_control_probability(),
+    ))
+    .expect_err("24M probability entries must be rejected before allocation");
+    let diagnostic = error
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E012")
+        .expect("the hard probability-table guard must have a dedicated error");
+    assert!(
+        error
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "W010"),
+        "E012 must replace the lower-severity W010 signal",
+    );
+    assert!(diagnostic.message.contains("24014002"));
+    assert!(diagnostic.message.contains("control=12007001"));
+}
+
+#[test]
+fn control_invariant_probability_table_counts_the_folded_control_axis() {
+    let model = compile(&probability_table_model(
+        3_000,
+        4_000,
+        json!({"lit": "1/2"}),
+    ))
+    .expect("control-independent probability table must fold before the hard guard");
+    assert_eq!(model.prob_table.entries.len(), 1);
+    assert!(model.prob_table.entry_control_invariant);
+    assert!(!model
+        .diagnostics
+        .iter()
+        .any(|diagnostic| matches!(diagnostic.code.as_str(), "W010" | "E012")));
+}
