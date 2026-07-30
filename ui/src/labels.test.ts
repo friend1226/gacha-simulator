@@ -21,6 +21,14 @@ describe("diagnostic labels", () => {
     expect(parsed.diagnostics.map((item) => item.code)).toEqual(coreCodes);
     expect(parsed.diagnostics.every((item) => item.title && item.fix)).toBe(true);
   });
+
+  it("explains every probability-table axis in W010 and E012 guidance", () => {
+    for (const code of ["W010", "E012"]) {
+      expect(diagnosticHelp[code].fix).toContain("시행 횟수");
+      expect(diagnosticHelp[code].fix).toContain("뽑기 결과 수");
+      expect(diagnosticHelp[code].fix).toContain("도달 가능한 제어 상태");
+    }
+  });
 });
 
 describe("confidence labels", () => {

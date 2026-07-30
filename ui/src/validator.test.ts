@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blueArchive } from "./preset";
+import { blueArchive, presets } from "./preset";
 import { parseExactLiteral, validateLocally } from "./validator";
 import type { ModelIr } from "./types";
 
@@ -51,6 +51,18 @@ describe("DP state-space preflight", () => {
       message: expect.stringContaining("50,000,000"),
     }));
     expect(diagnostics.some((item) => item.code === "W004")).toBe(false);
+  });
+});
+
+describe("preset DP preflight", () => {
+  it("keeps every bundled preset below the W004 warning threshold", () => {
+    for (const preset of presets) {
+      const diagnostics = validateLocally(preset.model).diagnostics;
+      expect(
+        diagnostics.some((item) => item.code === "W004" || item.code === "E011"),
+        preset.id,
+      ).toBe(false);
+    }
   });
 });
 
