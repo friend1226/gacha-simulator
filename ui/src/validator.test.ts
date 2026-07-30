@@ -22,6 +22,42 @@ describe("blue archive preset", () => {
   });
 });
 
+describe("expression probability preview", () => {
+  it("evaluates general entity and probability-rule expressions at the initial state", () => {
+    const model = largeDpModel(5);
+    model.stateVars = [{ id: "rateUp", init: 1, max: 1, role: "control" }];
+    model.entities = [{
+      id: "hit",
+      name: "당첨",
+      prob: {
+        if: { eq: [{ var: "rateUp" }, { lit: "1" }] },
+        then: { add: [{ lit: "1/10" }, { lit: "1/20" }] },
+        else: { lit: "0" },
+      },
+    }];
+    model.probRules = [{
+      target: "hit",
+      expr: {
+        if: {
+          and: [
+            { eq: [{ trial: true }, { lit: "1" }] },
+            { ge: [{ var: "rateUp" }, { lit: "1" }] },
+          ],
+        },
+        then: { clamp: [{ mul: [{ lit: "3" }, { lit: "1/10" }] }, { lit: "0" }, { lit: "1" }] },
+        else: { lit: "0" },
+      },
+    }];
+
+    const result = validateLocally(model);
+
+    expect(result.diagnostics.some((item) => item.code === "E006")).toBe(false);
+    expect(result.leaves.map((leaf) => leaf.id)).toEqual(["hit", "__other__"]);
+    expect(result.leaves[0].probability).toBeCloseTo(0.3, 12);
+    expect(result.leaves[1].probability).toBeCloseTo(0.7, 12);
+  });
+});
+
 describe("accumulator table preflight", () => {
   it("warns in the safe range and reports only E010 above the hard limit", () => {
     const warning = validateLocally(largeAccumulatorModel(2_000, 200)).diagnostics;

@@ -1,6 +1,13 @@
 import * as Blockly from "blockly/core";
 import "blockly/blocks";
-import type { Entity, Expr, ModelIr } from "./types";
+import type {
+  BooleanExpr,
+  Entity,
+  Expr,
+  ModelIr,
+  NumberExpr,
+  ProbabilityRule,
+} from "./types";
 
 Blockly.common.defineBlocksWithJsonArray([
   {
@@ -23,18 +30,19 @@ Blockly.common.defineBlocksWithJsonArray([
   },
   {
     type: "entity_definition",
-    message0: "뽑기 결과 %1 ID %2 확률 %3",
+    message0: "뽑기 결과 %1 ID %2",
     args0: [
       { type: "field_input", name: "NAME", text: "픽업" },
       { type: "field_input", name: "ID", text: "pickup" },
-      { type: "field_input", name: "PROB", text: "0.007" },
     ],
-    message1: "하위 결과 %1",
-    args1: [{ type: "input_statement", name: "CHILDREN" }],
+    message1: "확률 %1",
+    args1: [{ type: "input_value", name: "PROB", check: "Number" }],
+    message2: "하위 결과 %1",
+    args2: [{ type: "input_statement", name: "CHILDREN" }],
     previousStatement: null,
     nextStatement: null,
     colour: 342,
-    tooltip: "확률은 0.007, 1/3, 3e-5 같은 문자열로 정확히 보존됩니다.",
+    tooltip: "확률 소켓에 숫자 또는 숫자를 만드는 식을 연결합니다.",
   },
   {
     type: "control_variable",
@@ -68,40 +76,188 @@ Blockly.common.defineBlocksWithJsonArray([
     tooltip: "확률에는 영향을 주지 않고 결과 집계에만 쓰입니다.",
   },
   {
-    type: "soft_pity_rule",
-    message0: "%1 확률: %2가 %3 이상이면 %4 %5 / 기본 %6 / 증가량 %7",
+    type: "probability_rule",
+    message0: "%1 확률을 %2 로 설정",
     args0: [
       { type: "field_input", name: "TARGET", text: "star3" },
-      { type: "field_input", name: "VAR", text: "pity" },
-      { type: "field_number", name: "THRESHOLD", value: 65, min: 0, precision: 1 },
-      {
-        type: "field_dropdown",
-        name: "MODE",
-        options: [["선형 증가", "ramp"], ["확정값", "literal"]],
-      },
-      { type: "field_input", name: "THEN", text: "1" },
-      { type: "field_input", name: "BASE", text: "0.03" },
-      { type: "field_input", name: "STEP", text: "0.03" },
+      { type: "input_value", name: "EXPR", check: "Number" },
     ],
     previousStatement: null,
     nextStatement: null,
     colour: 268,
+    tooltip: "대상 ID와 새 확률을 계산할 숫자 식을 연결합니다.",
   },
   {
-    type: "trial_state_prob_rule",
-    message0: "%1 확률: %2회이고 %3가 %4이면 %5 / 기본 %6",
+    type: "expr_literal",
+    message0: "숫자 %1",
     args0: [
-      { type: "field_input", name: "TARGET", text: "star5" },
-      { type: "field_number", name: "TRIAL", value: 10, min: 1, precision: 1 },
-      { type: "field_input", name: "VAR", text: "highSeen" },
-      { type: "field_input", name: "STATE", text: "0" },
-      { type: "field_input", name: "THEN", text: "0.98" },
-      { type: "field_input", name: "ELSE", text: "0.08" },
+      { type: "field_input", name: "VALUE", text: "0.007" },
     ],
-    previousStatement: null,
-    nextStatement: null,
+    output: "Number",
+    colour: 230,
+    tooltip: "0.007, 1/3, 3e-5처럼 입력한 문자열을 f64 변환 없이 보존합니다.",
+  },
+  {
+    type: "expr_variable",
+    message0: "상태 변수 %1",
+    args0: [{ type: "field_input", name: "VAR", text: "pity" }],
+    output: "Number",
+    colour: 205,
+    tooltip: "확률이나 상태 갱신에서 읽을 상태 변수 ID를 입력합니다.",
+  },
+  {
+    type: "expr_trial",
+    message0: "시행 횟수",
+    output: "Number",
+    colour: 205,
+    tooltip: "현재 뽑기의 1부터 시작하는 시행 번호입니다.",
+  },
+  {
+    type: "expr_arithmetic",
+    message0: "%1 %2 %3",
+    args0: [
+      { type: "input_value", name: "LEFT", check: "Number" },
+      {
+        type: "field_dropdown",
+        name: "OP",
+        options: [["+", "add"], ["−", "sub"], ["×", "mul"], ["÷", "div"]],
+      },
+      { type: "input_value", name: "RIGHT", check: "Number" },
+    ],
+    inputsInline: true,
+    output: "Number",
+    colour: 230,
+    tooltip: "양쪽 숫자 소켓에 계산할 값을 연결합니다.",
+  },
+  {
+    type: "expr_unary",
+    message0: "%1 %2",
+    args0: [
+      {
+        type: "field_dropdown",
+        name: "OP",
+        options: [
+          ["부호 반전", "neg"],
+          ["절댓값", "abs"],
+          ["내림", "floor"],
+          ["올림", "ceil"],
+          ["반올림", "round"],
+        ],
+      },
+      { type: "input_value", name: "VALUE", check: "Number" },
+    ],
+    output: "Number",
+    colour: 230,
+    tooltip: "숫자 소켓에 단항 연산을 적용할 값을 연결합니다.",
+  },
+  {
+    type: "expr_minmax",
+    message0: "%1 (%2, %3)",
+    args0: [
+      {
+        type: "field_dropdown",
+        name: "OP",
+        options: [["최솟값", "min"], ["최댓값", "max"]],
+      },
+      { type: "input_value", name: "LEFT", check: "Number" },
+      { type: "input_value", name: "RIGHT", check: "Number" },
+    ],
+    inputsInline: true,
+    output: "Number",
+    colour: 230,
+    tooltip: "두 숫자 중 작은 값 또는 큰 값을 선택합니다.",
+  },
+  {
+    type: "expr_clamp",
+    message0: "%1 을(를) %2 이상 %3 이하로 제한",
+    args0: [
+      { type: "input_value", name: "VALUE", check: "Number" },
+      { type: "input_value", name: "LOW", check: "Number" },
+      { type: "input_value", name: "HIGH", check: "Number" },
+    ],
+    inputsInline: true,
+    output: "Number",
+    colour: 230,
+    tooltip: "값, 최솟값, 최댓값 순서로 숫자를 연결합니다.",
+  },
+  {
+    type: "expr_pow",
+    message0: "%1 의 %2 제곱",
+    args0: [
+      { type: "input_value", name: "BASE", check: "Number" },
+      {
+        type: "field_number",
+        name: "EXPONENT",
+        value: 2,
+        min: -2147483648,
+        max: 2147483647,
+        precision: 1,
+      },
+    ],
+    output: "Number",
+    colour: 230,
+    tooltip: "밑에는 숫자 식을 연결하고 지수에는 정수만 입력합니다.",
+  },
+  {
+    type: "expr_compare",
+    message0: "%1 %2 %3",
+    args0: [
+      { type: "input_value", name: "LEFT", check: "Number" },
+      {
+        type: "field_dropdown",
+        name: "OP",
+        options: [
+          ["=", "eq"],
+          ["≠", "ne"],
+          ["<", "lt"],
+          ["≤", "le"],
+          [">", "gt"],
+          ["≥", "ge"],
+        ],
+      },
+      { type: "input_value", name: "RIGHT", check: "Number" },
+    ],
+    inputsInline: true,
+    output: "Boolean",
+    colour: 120,
+    tooltip: "두 숫자를 비교해 참 또는 거짓을 만듭니다.",
+  },
+  {
+    type: "expr_logic",
+    message0: "%1 %2 %3",
+    args0: [
+      { type: "input_value", name: "LEFT", check: "Boolean" },
+      {
+        type: "field_dropdown",
+        name: "OP",
+        options: [["그리고", "and"], ["또는", "or"], ["서로 다름", "xor"]],
+      },
+      { type: "input_value", name: "RIGHT", check: "Boolean" },
+    ],
+    inputsInline: true,
+    output: "Boolean",
+    colour: 120,
+    tooltip: "양쪽에 참/거짓 식을 연결합니다.",
+  },
+  {
+    type: "expr_not",
+    message0: "아님 %1",
+    args0: [{ type: "input_value", name: "VALUE", check: "Boolean" }],
+    output: "Boolean",
+    colour: 120,
+    tooltip: "연결한 참/거짓 식의 결과를 뒤집습니다.",
+  },
+  {
+    type: "expr_if",
+    message0: "만약 %1",
+    args0: [{ type: "input_value", name: "IF", check: "Boolean" }],
+    message1: "이면 %1",
+    args1: [{ type: "input_value", name: "THEN", check: "Number" }],
+    message2: "아니면 %1",
+    args2: [{ type: "input_value", name: "ELSE", check: "Number" }],
+    output: "Number",
     colour: 268,
-    tooltip: "지정한 시행 횟수와 상태 변수 값이 모두 맞을 때 확률을 바꿉니다.",
+    tooltip: "조건에는 참/거짓 식을, 두 결과에는 숫자 식을 연결합니다.",
   },
   {
     type: "transition_set",
@@ -178,7 +334,23 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
   kind: "categoryToolbox",
   contents: [
     { kind: "category", name: "모델", colour: "#6372d9", contents: [{ kind: "block", type: "model_container" }] },
-    { kind: "category", name: "뽑기 결과", colour: "#d05a86", contents: [{ kind: "block", type: "entity_definition" }] },
+    {
+      kind: "category",
+      name: "뽑기 결과",
+      colour: "#d05a86",
+      contents: [{
+        kind: "block",
+        type: "entity_definition",
+        inputs: {
+          PROB: {
+            block: {
+              type: "expr_literal",
+              fields: { VALUE: "0.007" },
+            },
+          },
+        },
+      }],
+    },
     {
       kind: "category",
       name: "상태",
@@ -193,8 +365,134 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
       name: "확률 규칙",
       colour: "#7359c7",
       contents: [
-        { kind: "block", type: "soft_pity_rule" },
-        { kind: "block", type: "trial_state_prob_rule" },
+        {
+          kind: "block",
+          type: "probability_rule",
+          inputs: {
+            EXPR: {
+              block: {
+                type: "expr_literal",
+                fields: { VALUE: "0.03" },
+              },
+            },
+          },
+        },
+        {
+          kind: "block",
+          type: "probability_rule",
+          fields: { TARGET: "star3" },
+          inputs: {
+            EXPR: {
+              block: {
+                type: "expr_if",
+                inputs: {
+                  IF: {
+                    block: {
+                      type: "expr_compare",
+                      fields: { OP: "ge" },
+                      inputs: {
+                        LEFT: { block: { type: "expr_variable", fields: { VAR: "pity" } } },
+                        RIGHT: { block: { type: "expr_literal", fields: { VALUE: "65" } } },
+                      },
+                    },
+                  },
+                  THEN: {
+                    block: {
+                      type: "expr_arithmetic",
+                      fields: { OP: "add" },
+                      inputs: {
+                        LEFT: { block: { type: "expr_literal", fields: { VALUE: "0.03" } } },
+                        RIGHT: {
+                          block: {
+                            type: "expr_arithmetic",
+                            fields: { OP: "mul" },
+                            inputs: {
+                              LEFT: { block: { type: "expr_literal", fields: { VALUE: "0.03" } } },
+                              RIGHT: {
+                                block: {
+                                  type: "expr_arithmetic",
+                                  fields: { OP: "sub" },
+                                  inputs: {
+                                    LEFT: { block: { type: "expr_variable", fields: { VAR: "pity" } } },
+                                    RIGHT: { block: { type: "expr_literal", fields: { VALUE: "65" } } },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                  ELSE: { block: { type: "expr_literal", fields: { VALUE: "0.03" } } },
+                },
+              },
+            },
+          },
+        },
+        {
+          kind: "block",
+          type: "probability_rule",
+          fields: { TARGET: "star5" },
+          inputs: {
+            EXPR: {
+              block: {
+                type: "expr_if",
+                inputs: {
+                  IF: {
+                    block: {
+                      type: "expr_logic",
+                      fields: { OP: "and" },
+                      inputs: {
+                        LEFT: {
+                          block: {
+                            type: "expr_compare",
+                            fields: { OP: "eq" },
+                            inputs: {
+                              LEFT: { block: { type: "expr_trial" } },
+                              RIGHT: { block: { type: "expr_literal", fields: { VALUE: "10" } } },
+                            },
+                          },
+                        },
+                        RIGHT: {
+                          block: {
+                            type: "expr_compare",
+                            fields: { OP: "eq" },
+                            inputs: {
+                              LEFT: { block: { type: "expr_variable", fields: { VAR: "highSeen" } } },
+                              RIGHT: { block: { type: "expr_literal", fields: { VALUE: "0" } } },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                  THEN: { block: { type: "expr_literal", fields: { VALUE: "0.98" } } },
+                  ELSE: { block: { type: "expr_literal", fields: { VALUE: "0.08" } } },
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    {
+      kind: "category",
+      name: "값",
+      colour: "#5b78c7",
+      contents: [
+        { kind: "block", type: "expr_literal" },
+        { kind: "block", type: "expr_variable" },
+        { kind: "block", type: "expr_trial" },
+        { kind: "block", type: "expr_arithmetic" },
+        { kind: "block", type: "expr_unary" },
+        { kind: "block", type: "expr_minmax" },
+        { kind: "block", type: "expr_clamp" },
+        { kind: "block", type: "expr_pow" },
+        { kind: "block", type: "expr_compare" },
+        { kind: "block", type: "expr_logic" },
+        { kind: "block", type: "expr_not" },
+        { kind: "block", type: "expr_if" },
       ],
     },
     {
@@ -224,30 +522,11 @@ interface PreservedItem<T> {
 interface WorkspaceRoundTripState {
   entities: PreservedItem<Entity>[];
   stateVars: PreservedItem<ModelIr["stateVars"][number]>[];
-  probRules: PreservedItem<unknown>[];
+  probRules: PreservedItem<ProbabilityRule>[];
   transitions: PreservedItem<unknown>[];
   triggers: PreservedItem<unknown>[];
-  condition?: Expr;
+  condition?: BooleanExpr;
   unsupported: UnsupportedBlockItem[];
-}
-
-interface ProbRuleBlockData {
-  target: string;
-  variable: string;
-  threshold: string;
-  base: string;
-  mode: "ramp" | "literal";
-  then: string;
-  step: string;
-}
-
-interface TrialStateProbRuleBlockData {
-  target: string;
-  trial: string;
-  variable: string;
-  state: string;
-  then: string;
-  base: string;
 }
 
 interface TransitionBlockData {
@@ -293,12 +572,297 @@ function chain(first: Blockly.Block | null): Blockly.Block[] {
   return result;
 }
 
+type SerializedBlock = Blockly.serialization.blocks.State;
+
+const arithmeticOperators = ["add", "sub", "mul", "div"] as const;
+const unaryOperators = ["neg", "abs", "floor", "ceil", "round"] as const;
+const minMaxOperators = ["min", "max"] as const;
+const comparisonOperators = ["eq", "ne", "lt", "le", "gt", "ge"] as const;
+const logicOperators = ["and", "or", "xor"] as const;
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function binaryArguments(value: unknown): [unknown, unknown] | undefined {
+  return Array.isArray(value) && value.length === 2
+    ? [value[0], value[1]]
+    : undefined;
+}
+
+function ternaryArguments(value: unknown): [unknown, unknown, unknown] | undefined {
+  return Array.isArray(value) && value.length === 3
+    ? [value[0], value[1], value[2]]
+    : undefined;
+}
+
+function unaryArgument(value: unknown): unknown {
+  if (Array.isArray(value)) return value.length === 1 ? value[0] : undefined;
+  return value;
+}
+
+function blockInput(block: SerializedBlock): { block: SerializedBlock } {
+  return { block };
+}
+
+function numberExprState(expression: unknown): SerializedBlock | undefined {
+  const record = recordValue(expression);
+  if (!record) return undefined;
+  if (typeof record.lit === "string") {
+    return { type: "expr_literal", fields: { VALUE: record.lit } };
+  }
+  if (typeof record.var === "string") {
+    return { type: "expr_variable", fields: { VAR: record.var } };
+  }
+  if (record.trial === true) return { type: "expr_trial" };
+
+  if ("if" in record) {
+    const condition = booleanExprState(record.if);
+    const thenBranch = numberExprState(record.then);
+    const elseBranch = numberExprState(record.else);
+    if (!condition || !thenBranch || !elseBranch) return undefined;
+    return {
+      type: "expr_if",
+      inputs: {
+        IF: blockInput(condition),
+        THEN: blockInput(thenBranch),
+        ELSE: blockInput(elseBranch),
+      },
+    };
+  }
+
+  for (const operator of arithmeticOperators) {
+    if (!(operator in record)) continue;
+    const args = binaryArguments(record[operator]);
+    const left = args && numberExprState(args[0]);
+    const right = args && numberExprState(args[1]);
+    if (!left || !right) return undefined;
+    return {
+      type: "expr_arithmetic",
+      fields: { OP: operator },
+      inputs: { LEFT: blockInput(left), RIGHT: blockInput(right) },
+    };
+  }
+  for (const operator of unaryOperators) {
+    if (!(operator in record)) continue;
+    const value = numberExprState(unaryArgument(record[operator]));
+    if (!value) return undefined;
+    return {
+      type: "expr_unary",
+      fields: { OP: operator },
+      inputs: { VALUE: blockInput(value) },
+    };
+  }
+  for (const operator of minMaxOperators) {
+    if (!(operator in record)) continue;
+    const args = binaryArguments(record[operator]);
+    const left = args && numberExprState(args[0]);
+    const right = args && numberExprState(args[1]);
+    if (!left || !right) return undefined;
+    return {
+      type: "expr_minmax",
+      fields: { OP: operator },
+      inputs: { LEFT: blockInput(left), RIGHT: blockInput(right) },
+    };
+  }
+  if ("clamp" in record) {
+    const args = ternaryArguments(record.clamp);
+    const value = args && numberExprState(args[0]);
+    const low = args && numberExprState(args[1]);
+    const high = args && numberExprState(args[2]);
+    if (!value || !low || !high) return undefined;
+    return {
+      type: "expr_clamp",
+      inputs: {
+        VALUE: blockInput(value),
+        LOW: blockInput(low),
+        HIGH: blockInput(high),
+      },
+    };
+  }
+  if ("pow" in record) {
+    const args = binaryArguments(record.pow);
+    const base = args && numberExprState(args[0]);
+    const exponent = args && recordValue(args[1])?.lit;
+    const parsedExponent = typeof exponent === "string" && /^-?\d+$/.test(exponent)
+      ? Number(exponent)
+      : Number.NaN;
+    if (!base
+      || !Number.isInteger(parsedExponent)
+      || parsedExponent < -2_147_483_648
+      || parsedExponent > 2_147_483_647) return undefined;
+    return {
+      type: "expr_pow",
+      fields: { EXPONENT: parsedExponent },
+      inputs: { BASE: blockInput(base) },
+    };
+  }
+  return undefined;
+}
+
+function booleanExprState(expression: unknown): SerializedBlock | undefined {
+  const record = recordValue(expression);
+  if (!record) return undefined;
+  for (const operator of comparisonOperators) {
+    if (!(operator in record)) continue;
+    const args = binaryArguments(record[operator]);
+    const left = args && numberExprState(args[0]);
+    const right = args && numberExprState(args[1]);
+    if (!left || !right) return undefined;
+    return {
+      type: "expr_compare",
+      fields: { OP: operator },
+      inputs: { LEFT: blockInput(left), RIGHT: blockInput(right) },
+    };
+  }
+  for (const operator of logicOperators) {
+    if (!(operator in record)) continue;
+    const args = binaryArguments(record[operator]);
+    const left = args && booleanExprState(args[0]);
+    const right = args && booleanExprState(args[1]);
+    if (!left || !right) return undefined;
+    return {
+      type: "expr_logic",
+      fields: { OP: operator },
+      inputs: { LEFT: blockInput(left), RIGHT: blockInput(right) },
+    };
+  }
+  if ("not" in record) {
+    const value = booleanExprState(unaryArgument(record.not));
+    if (!value) return undefined;
+    return {
+      type: "expr_not",
+      inputs: { VALUE: blockInput(value) },
+    };
+  }
+  return undefined;
+}
+
+export function exprToBlock(
+  workspace: Blockly.Workspace,
+  expression: Expr,
+): Blockly.Block | undefined {
+  const state = numberExprState(expression) ?? booleanExprState(expression);
+  return state
+    ? Blockly.serialization.blocks.append(state, workspace)
+    : undefined;
+}
+
+function numberExprToBlock(
+  workspace: Blockly.Workspace,
+  expression: unknown,
+): Blockly.Block | undefined {
+  const state = numberExprState(expression);
+  return state
+    ? Blockly.serialization.blocks.append(state, workspace)
+    : undefined;
+}
+
+function inputBlock(block: Blockly.Block, name: string): Blockly.Block | undefined {
+  return block.getInputTargetBlock(name) ?? undefined;
+}
+
+function blockToNumberExpr(block: Blockly.Block | undefined): NumberExpr | undefined {
+  if (!block) return undefined;
+  if (block.type === "expr_literal") {
+    return { lit: String(block.getFieldValue("VALUE")) };
+  }
+  if (block.type === "expr_variable") {
+    return { var: String(block.getFieldValue("VAR")) };
+  }
+  if (block.type === "expr_trial") return { trial: true };
+  if (block.type === "expr_arithmetic") {
+    const operator = String(block.getFieldValue("OP"));
+    const left = blockToNumberExpr(inputBlock(block, "LEFT"));
+    const right = blockToNumberExpr(inputBlock(block, "RIGHT"));
+    if (!arithmeticOperators.includes(operator as typeof arithmeticOperators[number])
+      || !left
+      || !right) return undefined;
+    return { [operator]: [left, right] } as NumberExpr;
+  }
+  if (block.type === "expr_unary") {
+    const operator = String(block.getFieldValue("OP"));
+    const value = blockToNumberExpr(inputBlock(block, "VALUE"));
+    if (!unaryOperators.includes(operator as typeof unaryOperators[number]) || !value) {
+      return undefined;
+    }
+    return { [operator]: value } as NumberExpr;
+  }
+  if (block.type === "expr_minmax") {
+    const operator = String(block.getFieldValue("OP"));
+    const left = blockToNumberExpr(inputBlock(block, "LEFT"));
+    const right = blockToNumberExpr(inputBlock(block, "RIGHT"));
+    if (!minMaxOperators.includes(operator as typeof minMaxOperators[number])
+      || !left
+      || !right) return undefined;
+    return { [operator]: [left, right] } as NumberExpr;
+  }
+  if (block.type === "expr_clamp") {
+    const value = blockToNumberExpr(inputBlock(block, "VALUE"));
+    const low = blockToNumberExpr(inputBlock(block, "LOW"));
+    const high = blockToNumberExpr(inputBlock(block, "HIGH"));
+    return value && low && high ? { clamp: [value, low, high] } : undefined;
+  }
+  if (block.type === "expr_pow") {
+    const base = blockToNumberExpr(inputBlock(block, "BASE"));
+    const exponent = Number(block.getFieldValue("EXPONENT"));
+    return base
+      && Number.isInteger(exponent)
+      && exponent >= -2_147_483_648
+      && exponent <= 2_147_483_647
+      ? { pow: [base, { lit: String(exponent) }] }
+      : undefined;
+  }
+  if (block.type === "expr_if") {
+    const condition = blockToBooleanExpr(inputBlock(block, "IF"));
+    const thenBranch = blockToNumberExpr(inputBlock(block, "THEN"));
+    const elseBranch = blockToNumberExpr(inputBlock(block, "ELSE"));
+    return condition && thenBranch && elseBranch
+      ? { if: condition, then: thenBranch, else: elseBranch }
+      : undefined;
+  }
+  return undefined;
+}
+
+function blockToBooleanExpr(block: Blockly.Block | undefined): BooleanExpr | undefined {
+  if (!block) return undefined;
+  if (block.type === "expr_compare") {
+    const operator = String(block.getFieldValue("OP"));
+    const left = blockToNumberExpr(inputBlock(block, "LEFT"));
+    const right = blockToNumberExpr(inputBlock(block, "RIGHT"));
+    if (!comparisonOperators.includes(operator as typeof comparisonOperators[number])
+      || !left
+      || !right) return undefined;
+    return { [operator]: [left, right] } as BooleanExpr;
+  }
+  if (block.type === "expr_logic") {
+    const operator = String(block.getFieldValue("OP"));
+    const left = blockToBooleanExpr(inputBlock(block, "LEFT"));
+    const right = blockToBooleanExpr(inputBlock(block, "RIGHT"));
+    if (!logicOperators.includes(operator as typeof logicOperators[number])
+      || !left
+      || !right) return undefined;
+    return { [operator]: [left, right] } as BooleanExpr;
+  }
+  if (block.type === "expr_not") {
+    const value = blockToBooleanExpr(inputBlock(block, "VALUE"));
+    return value ? { not: value } : undefined;
+  }
+  return undefined;
+}
+
+export function blockToExpr(block: Blockly.Block): Expr | undefined {
+  return blockToNumberExpr(block) ?? blockToBooleanExpr(block);
+}
+
 function readEntity(block: Blockly.Block): Entity {
   const children = chain(block.getInputTargetBlock("CHILDREN")).map(readEntity);
   return {
     id: block.getFieldValue("ID"),
     name: block.getFieldValue("NAME"),
-    prob: { lit: String(block.getFieldValue("PROB")) },
+    prob: blockToNumberExpr(inputBlock(block, "PROB")) ?? { lit: "0" },
     blockId: block.id,
     ...(children.length ? { children } : {}),
   };
@@ -319,7 +883,8 @@ export function workspaceToIr(workspace: Blockly.Workspace, previous: ModelIr): 
     chain(root.getInputTargetBlock("ENTITIES")).map(readEntity),
     preserved.entities,
   );
-  const stateVars = mergePreserved(chain(root.getInputTargetBlock("STATE")).map((block) => {
+  const stateVars = mergePreserved<ModelIr["stateVars"][number]>(
+    chain(root.getInputTargetBlock("STATE")).map((block): ModelIr["stateVars"][number] => {
     if (block.type === "accumulator_variable") {
       const id = String(block.getFieldValue("ID"));
       return {
@@ -343,52 +908,17 @@ export function workspaceToIr(workspace: Blockly.Workspace, previous: ModelIr): 
       role: "control" as const,
       blockId: block.id,
     };
-  }), preserved.stateVars);
-  const probRules = mergePreserved(chain(root.getInputTargetBlock("PROB_RULES")).map((block) => {
-    if (block.type === "trial_state_prob_rule") {
-      return {
-        target: block.getFieldValue("TARGET"),
-        expr: {
-          if: {
-            and: [
-              {
-                eq: [
-                  { trial: true },
-                  { lit: String(block.getFieldValue("TRIAL")) },
-                ],
-              },
-              {
-                eq: [
-                  { var: block.getFieldValue("VAR") },
-                  { lit: String(block.getFieldValue("STATE")) },
-                ],
-              },
-            ],
-          },
-          then: { lit: String(block.getFieldValue("THEN")) },
-          else: { lit: String(block.getFieldValue("ELSE")) },
-        },
-        blockId: block.id,
-      };
-    }
-    const target = block.getFieldValue("TARGET");
-    const variable = block.getFieldValue("VAR");
-    const threshold = String(block.getFieldValue("THRESHOLD"));
-    const base = String(block.getFieldValue("BASE"));
-    const step = String(block.getFieldValue("STEP"));
-    const mode = block.getFieldValue("MODE");
-    return {
-      target,
-      expr: {
-        if: { ge: [{ var: variable }, { lit: threshold }] },
-        then: mode === "literal"
-          ? { lit: String(block.getFieldValue("THEN")) }
-          : { add: [{ lit: base }, { mul: [{ lit: step }, { sub: [{ var: variable }, { lit: threshold }] }] }] },
-        else: { lit: base },
-      },
+    }),
+    preserved.stateVars,
+  );
+  const probRules = mergePreserved<ProbabilityRule>(
+    chain(root.getInputTargetBlock("PROB_RULES")).map((block) => ({
+      target: String(block.getFieldValue("TARGET")),
+      expr: blockToNumberExpr(inputBlock(block, "EXPR")) ?? { lit: "0" },
       blockId: block.id,
-    };
-  }), preserved.probRules);
+    })),
+    preserved.probRules,
+  );
   const transitions = mergePreserved(chain(root.getInputTargetBlock("TRANSITIONS")).map((block) => {
     const variable = block.getFieldValue("VAR");
     const value = String(block.getFieldValue("VALUE"));
@@ -429,7 +959,7 @@ export function workspaceToIr(workspace: Blockly.Workspace, previous: ModelIr): 
     blockId: block.id,
   })), preserved.triggers);
   const conditionBlock = root.getInputTargetBlock("CONDITION");
-  let condition: Expr | undefined;
+  let condition: BooleanExpr | undefined;
   if (conditionBlock) {
     const entity = String(conditionBlock.getFieldValue("ENTITY"));
     condition = {
@@ -484,7 +1014,10 @@ function makeEntity(workspace: Blockly.Workspace, entity: Entity): Blockly.Block
   const block = createBlock(workspace, "entity_definition");
   block.setFieldValue(entity.name, "NAME");
   block.setFieldValue(entity.id, "ID");
-  block.setFieldValue(String(entity.prob.lit ?? "0"), "PROB");
+  const probability = numberExprToBlock(workspace, entity.prob);
+  if (probability) {
+    block.getInput("PROB")?.connection?.connect(probability.outputConnection!);
+  }
   append(block.getInput("CHILDREN"), (entity.children ?? []).map((child) => makeEntity(workspace, child)));
   return block;
 }
@@ -496,7 +1029,7 @@ function literalValue(value: unknown): string | undefined {
 }
 
 function supportedEntity(entity: Entity): boolean {
-  return literalValue(entity.prob) !== undefined
+  return numberExprState(entity.prob) !== undefined
     && (entity.children ?? []).every(supportedEntity);
 }
 
@@ -506,7 +1039,7 @@ function accumulatorBlockData(variable: ModelIr["stateVars"][number]) {
     || variable.update?.length !== 1) return undefined;
   const update = variable.update[0];
   const target = typeof update.when.leafOf === "string" ? update.when.leafOf : undefined;
-  const add = update.set.add;
+  const add = recordValue(update.set)?.add;
   if (!target || !Array.isArray(add) || add.length !== 2) return undefined;
   const isSelf = (value: unknown) => Boolean(value && typeof value === "object"
     && (value as Record<string, unknown>).var === variable.id);
@@ -514,72 +1047,6 @@ function accumulatorBlockData(variable: ModelIr["stateVars"][number]) {
     : isSelf(add[1]) ? literalValue(add[0]) : undefined;
   if (amount === undefined || !Number.isFinite(Number(amount)) || String(Number(amount)) !== amount) return undefined;
   return { target, amount };
-}
-
-function probRuleBlockData(rule: unknown): ProbRuleBlockData | undefined {
-  if (!rule || typeof rule !== "object") return undefined;
-  const record = rule as Record<string, unknown>;
-  const target = typeof record.target === "string" ? record.target : undefined;
-  const expr = record.expr as Record<string, unknown> | undefined;
-  const condition = expr?.if as Record<string, unknown> | undefined;
-  const ge = condition?.ge;
-  if (!target || !Array.isArray(ge) || ge.length !== 2) return undefined;
-  const variable = ge[0] && typeof ge[0] === "object"
-    ? (ge[0] as Record<string, unknown>).var : undefined;
-  const threshold = literalValue(ge[1]);
-  const base = literalValue(expr?.else);
-  if (typeof variable !== "string" || threshold === undefined || base === undefined) return undefined;
-
-  const literalThen = literalValue(expr?.then);
-  if (literalThen !== undefined) {
-    return { target, variable, threshold, base, mode: "literal", then: literalThen, step: "0" };
-  }
-  const then = expr?.then as Record<string, unknown> | undefined;
-  const add = then?.add;
-  if (!Array.isArray(add) || add.length !== 2 || literalValue(add[0]) !== base) return undefined;
-  const mul = add[1] && typeof add[1] === "object"
-    ? (add[1] as Record<string, unknown>).mul : undefined;
-  if (!Array.isArray(mul) || mul.length !== 2) return undefined;
-  const step = literalValue(mul[0]);
-  const sub = mul[1] && typeof mul[1] === "object"
-    ? (mul[1] as Record<string, unknown>).sub : undefined;
-  if (!step || !Array.isArray(sub) || sub.length !== 2) return undefined;
-  const subVariable = sub[0] && typeof sub[0] === "object"
-    ? (sub[0] as Record<string, unknown>).var : undefined;
-  if (subVariable !== variable || literalValue(sub[1]) !== threshold) return undefined;
-  return { target, variable, threshold, base, mode: "ramp", then: base, step };
-}
-
-function trialStateProbRuleBlockData(rule: unknown): TrialStateProbRuleBlockData | undefined {
-  if (!rule || typeof rule !== "object") return undefined;
-  const record = rule as Record<string, unknown>;
-  const target = typeof record.target === "string" ? record.target : undefined;
-  const expr = record.expr as Record<string, unknown> | undefined;
-  const condition = expr?.if as Record<string, unknown> | undefined;
-  const and = condition?.and;
-  if (!target || !Array.isArray(and) || and.length !== 2) return undefined;
-
-  const trialCondition = and[0] as Record<string, unknown> | undefined;
-  const trialEq = trialCondition?.eq;
-  const stateCondition = and[1] as Record<string, unknown> | undefined;
-  const stateEq = stateCondition?.eq;
-  if (!Array.isArray(trialEq) || trialEq.length !== 2
-    || !Array.isArray(stateEq) || stateEq.length !== 2) return undefined;
-
-  const trialOperand = trialEq[0] as Record<string, unknown> | undefined;
-  const trial = literalValue(trialEq[1]);
-  const stateOperand = stateEq[0] as Record<string, unknown> | undefined;
-  const variable = stateOperand?.var;
-  const state = literalValue(stateEq[1]);
-  const then = literalValue(expr?.then);
-  const base = literalValue(expr?.else);
-  if (trialOperand?.trial !== true
-    || trial === undefined
-    || typeof variable !== "string"
-    || state === undefined
-    || then === undefined
-    || base === undefined) return undefined;
-  return { target, trial, variable, state, then, base };
 }
 
 function transitionBlockData(transition: unknown): TransitionBlockData | undefined {
@@ -674,8 +1141,8 @@ function triggerBlockData(trigger: unknown): TriggerBlockData | undefined {
   };
 }
 
-function conditionBlockData(condition: Expr | undefined) {
-  const ge = condition?.ge;
+function conditionBlockData(condition: BooleanExpr | undefined) {
+  const ge = condition && "ge" in condition ? condition.ge : undefined;
   if (!Array.isArray(ge) || ge.length !== 2) return undefined;
   const variable = ge[0] && typeof ge[0] === "object"
     ? (ge[0] as Record<string, unknown>).var : undefined;
@@ -737,27 +1204,11 @@ export function loadIr(workspace: Blockly.Workspace, ir: ModelIr): UnsupportedBl
       return [block];
     }));
     append(root.getInput("PROB_RULES"), ir.probRules.flatMap((rule, index) => {
-      const softPity = probRuleBlockData(rule);
-      if (softPity) {
-        const block = createBlock(workspace, "soft_pity_rule");
-        block.setFieldValue(softPity.target, "TARGET");
-        block.setFieldValue(softPity.variable, "VAR");
-        block.setFieldValue(Number(softPity.threshold), "THRESHOLD");
-        block.setFieldValue(softPity.mode, "MODE");
-        block.setFieldValue(softPity.then, "THEN");
-        block.setFieldValue(softPity.base, "BASE");
-        block.setFieldValue(softPity.step, "STEP");
-        return [block];
-      }
-      const trialState = trialStateProbRuleBlockData(rule);
-      if (trialState) {
-        const block = createBlock(workspace, "trial_state_prob_rule");
-        block.setFieldValue(trialState.target, "TARGET");
-        block.setFieldValue(Number(trialState.trial), "TRIAL");
-        block.setFieldValue(trialState.variable, "VAR");
-        block.setFieldValue(trialState.state, "STATE");
-        block.setFieldValue(trialState.then, "THEN");
-        block.setFieldValue(trialState.base, "ELSE");
+      const expression = numberExprToBlock(workspace, rule.expr);
+      if (expression) {
+        const block = createBlock(workspace, "probability_rule");
+        block.setFieldValue(rule.target, "TARGET");
+        block.getInput("EXPR")?.connection?.connect(expression.outputConnection!);
         return [block];
       }
       preserved.probRules.push({ index, value: structuredClone(rule) });
