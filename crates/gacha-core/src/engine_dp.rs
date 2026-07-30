@@ -18,15 +18,19 @@ use web_time::Instant;
 #[cfg(target_arch = "wasm32")]
 struct SnapshotSession;
 
+pub const DEFAULT_DP_MAX_LAYER_STATES: usize = 1_000_000;
+
 #[derive(Debug, Clone)]
 pub struct DpOptions {
     pub prune_log10: Option<f64>,
+    pub max_layer_states: Option<usize>,
 }
 
 impl Default for DpOptions {
     fn default() -> Self {
         Self {
             prune_log10: Some(-18.0),
+            max_layer_states: Some(DEFAULT_DP_MAX_LAYER_STATES),
         }
     }
 }
@@ -45,6 +49,7 @@ pub struct DpResult {
     pub numeric: String,
     pub model_hash: String,
     pub trials: u32,
+    pub peak_states: usize,
     pub tracked_leaf_ids: Vec<String>,
     pub joint: Vec<DpCell>,
     pub first_hit: Option<FirstHitResult>,
@@ -101,9 +106,19 @@ pub enum DpRunResult {
     Exact(ExactResult),
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum DpError {
+    #[error(transparent)]
+    Exact(#[from] ExactError),
+    #[error("E011: approximate DP layer state count {actual} exceeds limit {limit}")]
+    LayerStateLimit { actual: usize, limit: usize },
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotRunError {
+    #[error(transparent)]
+    Dp(#[from] DpError),
     #[error(transparent)]
     Exact(#[from] ExactError),
     #[error(transparent)]
@@ -124,17 +139,17 @@ pub fn run_dp(
     model: &CompiledModel,
     options: DpOptions,
     progress: impl FnMut(u32, u32) -> bool,
-) -> Result<DpRunResult, ExactError> {
+) -> Result<DpRunResult, DpError> {
     match model.numeric {
         NumericBackend::F64 => Ok(DpRunResult::Approximate(run_generic::<F64>(
             model, options, progress, "f64",
-        ))),
+        )?)),
         NumericBackend::Scaled => Ok(DpRunResult::Approximate(run_generic::<ScaledF64>(
             model, options, progress, "scaled",
-        ))),
-        NumericBackend::Exact => {
-            run_exact(model, ExactOptions::default(), progress).map(DpRunResult::Exact)
-        }
+        )?)),
+        NumericBackend::Exact => run_exact(model, ExactOptions::default(), progress)
+            .map(DpRunResult::Exact)
+            .map_err(DpError::from),
     }
 }
 
@@ -142,7 +157,7 @@ pub fn run_dp_f64(
     model: &CompiledModel,
     options: DpOptions,
     progress: impl FnMut(u32, u32) -> bool,
-) -> DpResult {
+) -> Result<DpResult, DpError> {
     run_generic::<F64>(model, options, progress, "f64")
 }
 
@@ -161,14 +176,14 @@ pub fn run_dp_with_snapshots(
             progress,
             "f64",
             Some(&mut session),
-        )),
+        )?),
         NumericBackend::Scaled => DpRunResult::Approximate(run_generic_with_snapshot::<ScaledF64>(
             model,
             options,
             progress,
             "scaled",
             Some(&mut session),
-        )),
+        )?),
         NumericBackend::Exact => DpRunResult::Exact(crate::engine_exact::run_exact_with_snapshot(
             model,
             ExactOptions::default(),
@@ -215,7 +230,7 @@ fn run_generic<P: Prob>(
     options: DpOptions,
     progress: impl FnMut(u32, u32) -> bool,
     backend: &str,
-) -> DpResult {
+) -> Result<DpResult, DpError> {
     run_generic_with_snapshot::<P>(model, options, progress, backend, None)
 }
 
@@ -225,7 +240,7 @@ fn run_generic_with_snapshot<P: Prob>(
     mut progress: impl FnMut(u32, u32) -> bool,
     backend: &str,
     mut snapshot: Option<&mut SnapshotSession>,
-) -> DpResult {
+) -> Result<DpResult, DpError> {
     let started = Instant::now();
     let converted: Vec<Vec<Vec<P>>> = model
         .prob_table
@@ -262,6 +277,7 @@ fn run_generic_with_snapshot<P: Prob>(
         .map(|_| vec![P::zero(); model.max_trials as usize + 1]);
     let mut pruned_mass = 0.0;
     let mut completed_trials = 0;
+    let mut peak_states = 1usize;
     let mut accumulator_clamp_events = 0u64;
     let mut trial_series = TrialSeriesResult {
         mode: match model.trial_series {
@@ -295,6 +311,15 @@ fn run_generic_with_snapshot<P: Prob>(
                 keep
             });
         }
+        if let Some(limit) = options.max_layer_states {
+            if next.len() > limit {
+                return Err(DpError::LayerStateLimit {
+                    actual: next.len(),
+                    limit,
+                });
+            }
+        }
+        peak_states = peak_states.max(next.len());
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(session) = snapshot.as_deref_mut() {
             session.on_approx_layer(model, &codec, next_trial, &next);
@@ -324,10 +349,11 @@ fn run_generic_with_snapshot<P: Prob>(
     }
     let cells = joint_cells(model, &codec, &layer);
     let first_hit = hit_pmf.map(|values| summarize_first_hit(&values));
-    DpResult {
+    Ok(DpResult {
         numeric: backend.into(),
         model_hash: model.model_hash_hex(),
         trials: completed_trials,
+        peak_states,
         tracked_leaf_ids: model.tracked_ids.clone(),
         joint: cells,
         first_hit,
@@ -336,7 +362,7 @@ fn run_generic_with_snapshot<P: Prob>(
         clamp_events: model.prob_table.clamp_events,
         accumulator_clamp_events,
         trial_series,
-    }
+    })
 }
 
 struct LayerExpansion<P> {
@@ -830,13 +856,64 @@ mod tests {
         }))
         .unwrap();
         let model = compile(&ir).unwrap();
-        let result = run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).unwrap();
+        let result = run_dp(
+            &model,
+            DpOptions {
+                prune_log10: None,
+                ..Default::default()
+            },
+            |_, _| true,
+        )
+        .unwrap();
         let DpRunResult::Approximate(result) = result else {
             panic!("scaled backend must use approximate DP");
         };
         let total: f64 = result.joint.iter().map(|c| c.probability).sum();
         assert!((total - 1.0).abs() < 1e-12);
         assert!((result.joint[5].probability - 252.0 / 1024.0).abs() < 1e-12);
+        assert_eq!(result.peak_states, 11);
+    }
+
+    #[test]
+    fn approximate_dp_stops_with_a_named_error_at_the_layer_state_limit() {
+        let ir: ModelIr = serde_json::from_value(json!({
+            "irVersion": 1,
+            "name": "limited coin",
+            "entities": [{"id": "hit", "name": "hit", "prob": {"lit": "1/2"}}],
+            "stateVars": [],
+            "probRules": [],
+            "transitions": [],
+            "triggers": [],
+            "run": {"maxTrials": 10, "trackJoint": ["hit"], "numeric": "scaled"}
+        }))
+        .unwrap();
+        let model = compile(&ir).unwrap();
+        let mut last_progress = 0;
+        let error = run_dp(
+            &model,
+            DpOptions {
+                prune_log10: None,
+                max_layer_states: Some(10),
+            },
+            |done, _| {
+                last_progress = done;
+                true
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().starts_with("E011:"));
+        assert!(matches!(
+            &error,
+            DpError::LayerStateLimit {
+                actual: 11,
+                limit: 10
+            }
+        ));
+        assert_eq!(
+            last_progress, 9,
+            "the runtime limit must return an error before reporting a partial result as complete",
+        );
     }
 
     #[test]
@@ -864,16 +941,24 @@ mod tests {
 
         let baseline = run_generic::<ScaledF64>(
             &baseline,
-            DpOptions { prune_log10: None },
+            DpOptions {
+                prune_log10: None,
+                ..Default::default()
+            },
             |_, _| true,
             "scaled",
-        );
+        )
+        .unwrap();
         let optimized = run_generic::<ScaledF64>(
             &optimized,
-            DpOptions { prune_log10: None },
+            DpOptions {
+                prune_log10: None,
+                ..Default::default()
+            },
             |_, _| true,
             "scaled",
-        );
+        )
+        .unwrap();
         assert_eq!(
             baseline
                 .joint
@@ -902,7 +987,15 @@ mod tests {
         }))
         .unwrap();
         let model = compile(&ir).unwrap();
-        let result = run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).unwrap();
+        let result = run_dp(
+            &model,
+            DpOptions {
+                prune_log10: None,
+                ..Default::default()
+            },
+            |_, _| true,
+        )
+        .unwrap();
         let DpRunResult::Exact(result) = result else {
             panic!("exact backend must use BigInt DP");
         };
@@ -937,10 +1030,14 @@ mod tests {
             let model = compile(&ir).unwrap();
             let dp = run_generic::<ScaledF64>(
                 &model,
-                DpOptions { prune_log10: None },
+                DpOptions {
+                    prune_log10: None,
+                    ..Default::default()
+                },
                 |_, _| true,
                 "scaled",
-            );
+            )
+            .unwrap();
             let mc = run_mc(
                 &model,
                 McOptions {
@@ -1033,10 +1130,14 @@ mod tests {
         let exact = run_exact(&model, ExactOptions::default(), |_, _| true).unwrap();
         let scaled = run_generic::<ScaledF64>(
             &model,
-            DpOptions { prune_log10: None },
+            DpOptions {
+                prune_log10: None,
+                ..Default::default()
+            },
             |_, _| true,
             "scaled",
-        );
+        )
+        .unwrap();
 
         assert_eq!(exact.tracked_leaf_ids, scaled.tracked_leaf_ids);
         let exact_cells: BTreeMap<_, _> = exact
@@ -1094,16 +1195,24 @@ mod tests {
         let granted_model = compile(&granted).unwrap();
         let baseline = run_generic::<ScaledF64>(
             &baseline_model,
-            DpOptions { prune_log10: None },
+            DpOptions {
+                prune_log10: None,
+                ..Default::default()
+            },
             |_, _| true,
             "scaled",
-        );
+        )
+        .unwrap();
         let with_grant = run_generic::<ScaledF64>(
             &granted_model,
-            DpOptions { prune_log10: None },
+            DpOptions {
+                prune_log10: None,
+                ..Default::default()
+            },
             |_, _| true,
             "scaled",
-        );
+        )
+        .unwrap();
 
         fn parent_distribution(result: &DpResult) -> BTreeMap<u32, f64> {
             let mut distribution = BTreeMap::new();

@@ -34,6 +34,40 @@ describe("accumulator table preflight", () => {
   });
 });
 
+describe("DP state-space preflight", () => {
+  it("blocks execution above the core estimated-state hard limit", () => {
+    const diagnostics = validateLocally(largeDpModel()).diagnostics;
+    expect(diagnostics.find((item) => item.code === "W004")).toEqual(expect.objectContaining({
+      severity: "error",
+      message: expect.stringContaining("50,000,000"),
+    }));
+  });
+});
+
+function largeDpModel(): ModelIr {
+  return {
+    irVersion: 2,
+    name: "large DP",
+    entities: [
+      { id: "a", name: "A", prob: { lit: "1/4" } },
+      { id: "b", name: "B", prob: { lit: "1/4" } },
+      { id: "c", name: "C", prob: { lit: "1/4" } },
+      { id: "d", name: "D", prob: { lit: "1/4" } },
+    ],
+    nestingPolicy: "clampChildren",
+    stateVars: [],
+    probRules: [],
+    transitions: [],
+    triggers: [],
+    run: {
+      maxTrials: 500,
+      trackJoint: ["a", "b", "c", "d"],
+      numeric: "scaled",
+      trialSeries: "none",
+    },
+  };
+}
+
 function largeAccumulatorModel(max: number, maxTrials: number): ModelIr {
   return {
     irVersion: 2,

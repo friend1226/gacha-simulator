@@ -78,6 +78,8 @@ pub struct AccumulatorTable {
 
 const ACCUMULATOR_TABLE_WARNING_ENTRIES: u128 = 500_000;
 const ACCUMULATOR_TABLE_MAX_ENTRIES: u128 = 10_000_000;
+pub const DP_CONTROL_STATE_LIMIT: u64 = 10_000_000;
+pub const DP_ESTIMATED_STATE_LIMIT: u64 = 50_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrackedDimension {
@@ -689,7 +691,7 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     let control_states = control_max
         .iter()
         .fold(1u64, |n, max| n.saturating_mul(*max as u64 + 1));
-    if control_states > 10_000_000 {
+    if control_states > DP_CONTROL_STATE_LIMIT {
         diagnostics.push(warning(
             "W004",
             format!("control space {control_states} exceeds precompute limit"),
@@ -950,8 +952,9 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
         &state_count_max,
     )
     .is_ok();
-    let dp_available =
-        state_encoding_available && control_states <= 10_000_000 && total_states <= 50_000_000;
+    let dp_available = state_encoding_available
+        && control_states <= DP_CONTROL_STATE_LIMIT
+        && total_states <= DP_ESTIMATED_STATE_LIMIT;
     let blockers = if dp_available {
         Vec::new()
     } else if !state_encoding_available {

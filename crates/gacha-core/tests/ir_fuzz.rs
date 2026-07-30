@@ -206,8 +206,15 @@ fn randomized_small_valid_models_finish_in_dp_and_mc() {
         let model = compile(&ir).expect("engine fuzz model must compile");
 
         let outcome = catch_unwind(AssertUnwindSafe(|| {
-            let dp =
-                run_dp(&model, DpOptions { prune_log10: None }, |_, _| true).expect("DP fuzz run");
+            let dp = run_dp(
+                &model,
+                DpOptions {
+                    prune_log10: None,
+                    ..Default::default()
+                },
+                |_, _| true,
+            )
+            .expect("DP fuzz run");
             assert!(matches!(dp, DpRunResult::Approximate(_)));
             let mc = run_mc(
                 &model,

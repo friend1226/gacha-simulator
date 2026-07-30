@@ -668,7 +668,10 @@ mod tests {
             let directory = root.join(suffix);
             let (_, manifest) = crate::run_dp_with_snapshots(
                 &model,
-                crate::DpOptions { prune_log10: None },
+                crate::DpOptions {
+                    prune_log10: None,
+                    ..Default::default()
+                },
                 SnapshotOptions {
                     output_dir: directory,
                     policy,
@@ -689,7 +692,10 @@ mod tests {
 
         let restored = crate::restore_dp_snapshot(
             &model,
-            crate::DpOptions { prune_log10: None },
+            crate::DpOptions {
+                prune_log10: None,
+                ..Default::default()
+            },
             root.join("restore"),
             3,
         )
@@ -701,7 +707,10 @@ mod tests {
         exact_model.numeric = crate::ir::NumericBackend::Exact;
         let (_, exact_manifest) = crate::run_dp_with_snapshots(
             &exact_model,
-            crate::DpOptions { prune_log10: None },
+            crate::DpOptions {
+                prune_log10: None,
+                ..Default::default()
+            },
             SnapshotOptions {
                 output_dir: root.join("exact"),
                 policy: SnapshotPolicy::Checkpoint,
