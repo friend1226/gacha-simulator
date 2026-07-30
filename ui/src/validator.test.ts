@@ -35,16 +35,26 @@ describe("accumulator table preflight", () => {
 });
 
 describe("DP state-space preflight", () => {
-  it("blocks execution above the core estimated-state hard limit", () => {
-    const diagnostics = validateLocally(largeDpModel()).diagnostics;
+  it("warns above the runtime layer limit without blocking execution", () => {
+    const diagnostics = validateLocally(largeDpModel(180)).diagnostics;
     expect(diagnostics.find((item) => item.code === "W004")).toEqual(expect.objectContaining({
+      severity: "warning",
+      message: expect.stringContaining("1,000,000"),
+    }));
+    expect(diagnostics.some((item) => item.code === "E011")).toBe(false);
+  });
+
+  it("blocks execution above the core estimated-state hard limit", () => {
+    const diagnostics = validateLocally(largeDpModel(500)).diagnostics;
+    expect(diagnostics.find((item) => item.code === "E011")).toEqual(expect.objectContaining({
       severity: "error",
       message: expect.stringContaining("50,000,000"),
     }));
+    expect(diagnostics.some((item) => item.code === "W004")).toBe(false);
   });
 });
 
-function largeDpModel(): ModelIr {
+function largeDpModel(maxTrials: number): ModelIr {
   return {
     irVersion: 2,
     name: "large DP",
@@ -60,7 +70,7 @@ function largeDpModel(): ModelIr {
     transitions: [],
     triggers: [],
     run: {
-      maxTrials: 500,
+      maxTrials,
       trackJoint: ["a", "b", "c", "d"],
       numeric: "scaled",
       trialSeries: "none",
