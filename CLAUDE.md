@@ -135,6 +135,10 @@ M8 성능·스냅샷, M9 집계 변수·결과 UI를 끝내고 라이브 서비�
 - `dev` → `main` 머지는 소유자가 판단하며 에이전트가 임의로 수행하지 않는다
 - 자동 프로덕션 배포는 `main` push에서만 실행된다
 - Model IR 스키마를 바꾸면 `irVersion`을 올리고 `presets/`와 `ui/src/types.ts`를 함께 갱신한다
-- 새 진단 코드를 추가하면 `docs/DESIGN.md` §3.4 표에 등재한다
+- 새 진단 코드를 추가하면 `docs/DESIGN.md` §3.4 표와 UI 진단 라벨·도움말에 함께 등재한다
+- 검증 임계값은 `ui/src/validator.ts`, `crates/gacha-core/src/compile.rs`,
+  `crates/gacha-core/src/engine_dp.rs` 사이에서 동기 유지한다
 - 스펙과 다르게 구현할 이유가 생기면 코드만 바꾸지 말고 §13에 기록한다
-- `upload/`는 초기 명세를 붙여넣은 임시 디렉터리다. `docs/DESIGN.md`가 정본이므로 삭제 대상이다
+- 검증 결과는 `docs/STATUS.md`에 남긴다. 임시 계획서와 측정 파일, `ui/public/wasm`과
+  `ui/dist` 빌드 산출물은 커밋하지 않는다
+- 「다음 후보」의 소유자 판단 대기 항목은 명시적 승인 없이 착수하지 않는다
