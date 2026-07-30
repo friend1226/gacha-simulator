@@ -1,9 +1,46 @@
-export type Expr = Record<string, unknown>;
+export type NumberExpr =
+  | { lit: string }
+  | { var: string }
+  | { trial: true }
+  | { add: [NumberExpr, NumberExpr] }
+  | { sub: [NumberExpr, NumberExpr] }
+  | { mul: [NumberExpr, NumberExpr] }
+  | { div: [NumberExpr, NumberExpr] }
+  | { neg: NumberExpr }
+  | { abs: NumberExpr }
+  | { floor: NumberExpr }
+  | { ceil: NumberExpr }
+  | { round: NumberExpr }
+  | { min: [NumberExpr, NumberExpr] }
+  | { max: [NumberExpr, NumberExpr] }
+  | { clamp: [NumberExpr, NumberExpr, NumberExpr] }
+  | { pow: [NumberExpr, { lit: string }] }
+  | { if: BooleanExpr; then: NumberExpr; else: NumberExpr };
+
+export type BooleanExpr =
+  | { eq: [NumberExpr, NumberExpr] }
+  | { ne: [NumberExpr, NumberExpr] }
+  | { lt: [NumberExpr, NumberExpr] }
+  | { le: [NumberExpr, NumberExpr] }
+  | { gt: [NumberExpr, NumberExpr] }
+  | { ge: [NumberExpr, NumberExpr] }
+  | { and: [BooleanExpr, BooleanExpr] }
+  | { or: [BooleanExpr, BooleanExpr] }
+  | { not: BooleanExpr }
+  | { xor: [BooleanExpr, BooleanExpr] };
+
+export type Expr = NumberExpr | BooleanExpr;
+
+export interface ProbabilityRule {
+  target: string;
+  expr: NumberExpr;
+  blockId?: string;
+}
 
 export interface Entity {
   id: string;
   name: string;
-  prob: Expr;
+  prob: NumberExpr;
   children?: Entity[];
   blockId?: string;
 }
@@ -23,14 +60,14 @@ export interface ModelIr {
     clampPolicy?: "saturate" | "error";
     blockId?: string;
   }>;
-  probRules: unknown[];
+  probRules: ProbabilityRule[];
   transitions: unknown[];
   triggers: unknown[];
   run: {
     maxTrials: number;
     trackJoint: string[];
     numeric: "f64" | "scaled" | "exact";
-    condition?: Expr;
+    condition?: BooleanExpr;
     trialSeries?: "none" | "marginal" | "checkpoints";
     seriesCheckpoints?: number[];
   };

@@ -1,4 +1,12 @@
-import type { Diagnostic, Entity, LeafView, ModelIr, ValidationView } from "./types";
+import type {
+  BooleanExpr,
+  Diagnostic,
+  Entity,
+  LeafView,
+  ModelIr,
+  NumberExpr,
+  ValidationView,
+} from "./types";
 
 // Keep these thresholds in sync with crates/gacha-core/src/compile.rs,
 // DEFAULT_DP_LAYER_STATE_LIMIT ↔ engine_dp::DEFAULT_DP_MAX_LAYER_STATES and
@@ -44,11 +52,112 @@ function reduce(numerator: bigint, denominator: bigint) {
 const decimal = (r: { numerator: bigint; denominator: bigint }) =>
   Number(r.numerator) / Number(r.denominator);
 
+function evaluatePreviewNumber(
+  expression: NumberExpr,
+  variables: Map<string, number>,
+  trial: number,
+): number {
+  if ("lit" in expression) return decimal(parseExactLiteral(expression.lit));
+  if ("var" in expression) {
+    const value = variables.get(expression.var);
+    if (value === undefined) throw new Error(`알 수 없는 상태 변수: ${expression.var}`);
+    return value;
+  }
+  if ("trial" in expression) return trial;
+  if ("if" in expression) {
+    return evaluatePreviewBoolean(expression.if, variables, trial)
+      ? evaluatePreviewNumber(expression.then, variables, trial)
+      : evaluatePreviewNumber(expression.else, variables, trial);
+  }
+  if ("add" in expression) {
+    return evaluatePreviewNumber(expression.add[0], variables, trial)
+      + evaluatePreviewNumber(expression.add[1], variables, trial);
+  }
+  if ("sub" in expression) {
+    return evaluatePreviewNumber(expression.sub[0], variables, trial)
+      - evaluatePreviewNumber(expression.sub[1], variables, trial);
+  }
+  if ("mul" in expression) {
+    return evaluatePreviewNumber(expression.mul[0], variables, trial)
+      * evaluatePreviewNumber(expression.mul[1], variables, trial);
+  }
+  if ("div" in expression) {
+    const denominator = evaluatePreviewNumber(expression.div[1], variables, trial);
+    if (denominator === 0) throw new Error("0으로 나눌 수 없습니다");
+    return evaluatePreviewNumber(expression.div[0], variables, trial) / denominator;
+  }
+  if ("neg" in expression) return -evaluatePreviewNumber(expression.neg, variables, trial);
+  if ("abs" in expression) return Math.abs(evaluatePreviewNumber(expression.abs, variables, trial));
+  if ("floor" in expression) return Math.floor(evaluatePreviewNumber(expression.floor, variables, trial));
+  if ("ceil" in expression) return Math.ceil(evaluatePreviewNumber(expression.ceil, variables, trial));
+  if ("round" in expression) {
+    return Math.floor(evaluatePreviewNumber(expression.round, variables, trial) + 0.5);
+  }
+  if ("min" in expression) {
+    return Math.min(
+      evaluatePreviewNumber(expression.min[0], variables, trial),
+      evaluatePreviewNumber(expression.min[1], variables, trial),
+    );
+  }
+  if ("max" in expression) {
+    return Math.max(
+      evaluatePreviewNumber(expression.max[0], variables, trial),
+      evaluatePreviewNumber(expression.max[1], variables, trial),
+    );
+  }
+  if ("clamp" in expression) {
+    const value = evaluatePreviewNumber(expression.clamp[0], variables, trial);
+    const low = evaluatePreviewNumber(expression.clamp[1], variables, trial);
+    const high = evaluatePreviewNumber(expression.clamp[2], variables, trial);
+    return Math.min(Math.max(value, low), high);
+  }
+  const exponent = parseExactLiteral(expression.pow[1].lit);
+  if (exponent.denominator !== 1n) throw new Error("거듭제곱 지수는 정수여야 합니다");
+  return evaluatePreviewNumber(expression.pow[0], variables, trial)
+    ** Number(exponent.numerator);
+}
+
+function evaluatePreviewBoolean(
+  expression: BooleanExpr,
+  variables: Map<string, number>,
+  trial: number,
+): boolean {
+  if ("and" in expression) {
+    return evaluatePreviewBoolean(expression.and[0], variables, trial)
+      && evaluatePreviewBoolean(expression.and[1], variables, trial);
+  }
+  if ("or" in expression) {
+    return evaluatePreviewBoolean(expression.or[0], variables, trial)
+      || evaluatePreviewBoolean(expression.or[1], variables, trial);
+  }
+  if ("not" in expression) return !evaluatePreviewBoolean(expression.not, variables, trial);
+  if ("xor" in expression) {
+    return evaluatePreviewBoolean(expression.xor[0], variables, trial)
+      !== evaluatePreviewBoolean(expression.xor[1], variables, trial);
+  }
+  const operands = "eq" in expression ? expression.eq
+    : "ne" in expression ? expression.ne
+      : "lt" in expression ? expression.lt
+        : "le" in expression ? expression.le
+          : "gt" in expression ? expression.gt
+            : expression.ge;
+  const left = evaluatePreviewNumber(operands[0], variables, trial);
+  const right = evaluatePreviewNumber(operands[1], variables, trial);
+  if ("eq" in expression) return left === right;
+  if ("ne" in expression) return left !== right;
+  if ("lt" in expression) return left < right;
+  if ("le" in expression) return left <= right;
+  if ("gt" in expression) return left > right;
+  return left >= right;
+}
+
 export function validateLocally(ir: ModelIr): ValidationView {
   const diagnostics: Diagnostic[] = [];
   const ids = new Set<string>();
   const leaves: LeafView[] = [];
   const leafAncestors = new Map<string, string[]>();
+  const previewVariables = new Map(ir.stateVars.map((variable) => [variable.id, variable.init]));
+  const previewRules = new Map(ir.probRules.map((rule) => [rule.target, rule.expr]));
 
   function walk(entity: Entity, ancestors: string[]): number {
     if (ids.has(entity.id)) {
@@ -57,9 +166,11 @@ export function validateLocally(ir: ModelIr): ValidationView {
     ids.add(entity.id);
     let probability = 0;
     try {
-      const literal = entity.prob.lit;
-      if (typeof literal !== "string") throw new Error("UI 미리보기는 리터럴 확률만 즉시 계산합니다");
-      probability = decimal(parseExactLiteral(literal));
+      probability = evaluatePreviewNumber(
+        previewRules.get(entity.id) ?? entity.prob,
+        previewVariables,
+        1,
+      );
       if (probability < 0) diagnostics.push({ code: "E002", severity: "error", message: `${entity.name} 확률이 음수입니다`, blockId: entity.blockId });
     } catch (error) {
       diagnostics.push({ code: "E006", severity: "error", message: String(error), blockId: entity.blockId });
@@ -200,7 +311,9 @@ function isDerivedLeafCounter(
   const target = typeof update.when.leafOf === "string"
     ? update.when.leafOf
     : typeof update.when.leafIs === "string" ? update.when.leafIs : undefined;
-  const add = update.set.add;
+  const add = update.set && typeof update.set === "object" && "add" in update.set
+    ? update.set.add
+    : undefined;
   if (!target || !Array.isArray(add) || add.length !== 2) return false;
   const isSelf = (value: unknown) => Boolean(value && typeof value === "object"
     && (value as Record<string, unknown>).var === variable.id);
