@@ -366,7 +366,7 @@ f64로 먼저 파싱한 뒤 유리수로 변환하면 `0.007`이 `7.000000000000
 | W004 | 추정 상태 수가 기본 DP 런타임 레이어 상한을 넘을 수 있음 | warning |
 | W007 | `consumesTrial` 지급이 남은 논리 시행 예산을 초과해 적용되지 않음 | warning |
 | E007 | `grant.leaf`가 내부 노드를 가리킴 (어느 리프인지 모호) | error |
-| E008 | `transitions`/`triggers`가 리프 카운트를 직접 조작 | error |
+| E008 | `transitions`/`triggers` 대입 대상이 선언된 control이 아니거나 우변이 control·`trial` 외 변수를 참조 | error |
 | E009 | 자동 리프 카운터용 `role: stat`을 사용자가 선언 | error |
 | W008 | accumulator가 자동 리프 카운터와 동일하여 파생 표시식으로 강등 | warning |
 | W009 | accumulator 사전계산 테이블이 500,000 엔트리 이상 | warning |

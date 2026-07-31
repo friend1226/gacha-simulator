@@ -60,6 +60,130 @@ fn e005_rejects_probability_rule_for_unknown_entity() {
     assert!(diagnostic.message.contains("missing"));
 }
 
+fn assignment_variable_model(transitions: Vec<Value>, triggers: Vec<Value>) -> ModelIr {
+    let mut ir = base_model(
+        json!({
+            "if": {"ge": [{"var": "pity"}, {"lit": "2"}]},
+            "then": {"lit": "1"},
+            "else": {"lit": "0"}
+        }),
+        vec![
+            json!({"id": "pity", "init": 0, "max": 5, "role": "control"}),
+            json!({
+                "id": "spent",
+                "name": "spent",
+                "init": 0,
+                "max": 5,
+                "role": "accumulator",
+                "update": [{
+                    "when": {"leafOf": "hit"},
+                    "set": {"add": [{"var": "spent"}, {"lit": "1"}]}
+                }],
+                "clampPolicy": "saturate"
+            }),
+        ],
+    );
+    ir.transitions =
+        serde_json::from_value(Value::Array(transitions)).expect("transitions must deserialize");
+    ir.triggers =
+        serde_json::from_value(Value::Array(triggers)).expect("triggers must deserialize");
+    ir.run.max_trials = 4;
+    ir.run.numeric = gacha_core::ir::NumericBackend::Exact;
+    ir
+}
+
+#[test]
+fn e008_rejects_unresolvable_transition_assignment_variable() {
+    let ir = assignment_variable_model(
+        vec![json!({
+            "when": {
+                "or": [
+                    {"leafIs": "hit"},
+                    {"leafIs": "__other__"}
+                ]
+            },
+            "set": {
+                "pity": {"add": [{"var": "spent"}, {"lit": "1"}]}
+            },
+            "blockId": "transition-block"
+        })],
+        Vec::new(),
+    );
+    let error = compile(&ir).expect_err("transition RHS accumulator must fail compilation");
+    let diagnostic = error
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E008")
+        .expect("transition RHS must produce E008");
+
+    assert_eq!(diagnostic.severity, Severity::Error);
+    assert_eq!(diagnostic.block_id.as_deref(), Some("transition-block"));
+    assert!(diagnostic.message.contains("pity"));
+    assert!(diagnostic.message.contains("spent"));
+}
+
+#[test]
+fn e008_rejects_unresolvable_trigger_assignment_variable() {
+    let ir = assignment_variable_model(
+        Vec::new(),
+        vec![json!({
+            "at": {"trialCount": 2},
+            "set": {"pity": {"var": "spent"}},
+            "blockId": "trigger-block"
+        })],
+    );
+    let error = compile(&ir).expect_err("trigger RHS accumulator must fail compilation");
+    let diagnostic = error
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E008")
+        .expect("trigger RHS must produce E008");
+
+    assert_eq!(diagnostic.severity, Severity::Error);
+    assert_eq!(diagnostic.block_id.as_deref(), Some("trigger-block"));
+    assert!(diagnostic.message.contains("pity"));
+    assert!(diagnostic.message.contains("spent"));
+}
+
+#[test]
+fn assignment_rhs_accepts_control_trial_and_literal_expressions() {
+    let mut ir = base_model(
+        json!({"lit": "1/2"}),
+        vec![
+            json!({"id": "pity", "init": 0, "max": 5, "role": "control"}),
+            json!({"id": "source", "init": 1, "max": 5, "role": "control"}),
+            json!({"id": "trialCopy", "init": 0, "max": 5, "role": "control"}),
+            json!({"id": "fixed", "init": 0, "max": 5, "role": "control"}),
+        ],
+    );
+    ir.transitions = serde_json::from_value(json!([{
+        "when": {"leafOf": "hit"},
+        "set": {
+            "pity": {"var": "source"},
+            "trialCopy": {"trial": true},
+            "fixed": {"lit": "2"}
+        },
+        "blockId": "valid-transition"
+    }]))
+    .expect("valid transition must deserialize");
+    ir.triggers = serde_json::from_value(json!([{
+        "at": {"trialCount": 2},
+        "set": {
+            "pity": {"var": "source"},
+            "trialCopy": {"trial": true},
+            "fixed": {"lit": "3"}
+        },
+        "blockId": "valid-trigger"
+    }]))
+    .expect("valid trigger must deserialize");
+
+    let model = compile(&ir).expect("control, trial, and literal assignment RHS must compile");
+    assert!(!model
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E008"));
+}
+
 #[test]
 fn e002_uses_control_bounds_without_false_positive_for_correlated_terms() {
     let state_vars = vec![json!({

@@ -29,6 +29,12 @@ describe("diagnostic labels", () => {
       expect(diagnosticHelp[code].fix).toContain("도달 가능한 제어 상태");
     }
   });
+
+  it("explains both sides of E008 assignments", () => {
+    expect(diagnosticHelp.E008.fix).toContain("대입 대상");
+    expect(diagnosticHelp.E008.fix).toContain("우변 참조");
+    expect(diagnosticHelp.E008.fix).toContain("제어 변수");
+  });
 });
 
 describe("confidence labels", () => {
