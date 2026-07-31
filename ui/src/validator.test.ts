@@ -56,6 +56,22 @@ describe("expression probability preview", () => {
     expect(result.leaves[0].probability).toBeCloseTo(0.3, 12);
     expect(result.leaves[1].probability).toBeCloseTo(0.7, 12);
   });
+
+  it("does not expose accumulator variables to probability previews", () => {
+    const model = largeDpModel(5);
+    model.entities = [{ id: "hit", name: "당첨", prob: { var: "spent" } }];
+    model.stateVars = [{
+      id: "spent",
+      init: 1,
+      max: 10,
+      role: "accumulator",
+    }];
+
+    const diagnostics = validateLocally(model).diagnostics;
+
+    expect(diagnostics.find((item) => item.code === "E006")?.message)
+      .toContain("알 수 없는 상태 변수: spent");
+  });
 });
 
 describe("accumulator table preflight", () => {

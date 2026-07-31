@@ -79,6 +79,7 @@ export function ModelPanel({
           </div>
         )}
         <div className="leaf-list">
+          <p className="preview-caption">확률 미리보기 · 시행 1회, 변수 초기값 기준</p>
           {validation.leaves.map((leaf) => (
             <div className="leaf-row" key={leaf.id}>
               <span>{leaf.name}<small>{leaf.id}</small></span>

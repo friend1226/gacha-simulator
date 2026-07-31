@@ -156,7 +156,9 @@ export function validateLocally(ir: ModelIr): ValidationView {
   const ids = new Set<string>();
   const leaves: LeafView[] = [];
   const leafAncestors = new Map<string, string[]>();
-  const previewVariables = new Map(ir.stateVars.map((variable) => [variable.id, variable.init]));
+  const previewVariables = new Map(ir.stateVars
+    .filter((variable) => variable.role === "control")
+    .map((variable) => [variable.id, variable.init]));
   const previewRules = new Map(ir.probRules.map((rule) => [rule.target, rule.expr]));
 
   function walk(entity: Entity, ancestors: string[]): number {
