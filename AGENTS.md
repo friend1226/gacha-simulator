@@ -76,7 +76,11 @@ mirrored 1:1 in English. Keep that numbered list in sync with `CLAUDE.md`. Sourc
 ## Branch and merge process
 
 - `main` is the production deployment branch. Do not commit directly to it.
-- Branch work from `dev`, then merge the completed work back into `dev`.
+- Branch work from `dev` and open a pull request.
+- **Do not merge into `dev` before the work passes review.** Open the PR, confirm CI
+  passes, report completion together with the branch, commit, PR number, and an explicit
+  "awaiting merge", then stop. Merge only after approval. If changes are requested, push
+  additional commits to the same branch and report again.
 - Only the owner decides when to merge `dev` into `main`; agents must not do this on
   their own.
 - Automatic production deployment runs only on pushes to `main`.
