@@ -355,6 +355,8 @@ impl CompiledModel {
             let action_trial = trial + consumed;
             let before = control.to_vec();
             for (index, program) in &trigger.assignments {
+                // Assignment references are compile-time validated; keep this fallible
+                // evaluation as a defensive runtime guard.
                 if let Ok(value) = eval(
                     program,
                     |name| {
@@ -462,6 +464,8 @@ impl CompiledModel {
             let action_trial = trial + consumed;
             let before = control.to_vec();
             for (index, program) in &trigger.assignments {
+                // Assignment references are compile-time validated; keep this fallible
+                // evaluation as a defensive runtime guard.
                 if let Ok(value) = eval(
                     program,
                     |name| {
@@ -524,6 +528,8 @@ fn apply_compiled_transitions(
             continue;
         }
         for (index, program) in &transition.assignments {
+            // Assignment references are compile-time validated; keep this fallible
+            // evaluation as a defensive runtime guard.
             if let Ok(value) = eval(
                 program,
                 |name| {
@@ -1940,6 +1946,8 @@ fn apply_compiled_triggers_to_control(
         let action_trial = trial + consumed;
         let before = control.to_vec();
         for (index, program) in &trigger.assignments {
+            // Assignment references are compile-time validated; keep this fallible
+            // evaluation as a defensive runtime guard.
             if let Ok(value) = eval(
                 program,
                 |name| {
@@ -2503,7 +2511,25 @@ fn compile_assignments(
                 return None;
             };
             match compile_expr(expr) {
-                Ok(program) => Some((index, program)),
+                Ok(program) => {
+                    if let Some(reference) = program.ops.iter().find_map(|op| match op {
+                        Op::PushVar(reference) if !control_ids.contains(reference) => {
+                            Some(reference)
+                        }
+                        _ => None,
+                    }) {
+                        diagnostics.push(error(
+                            "E008",
+                            format!(
+                                "assignment to '{name}' references undeclared/non-control variable '{reference}'"
+                            ),
+                            block_id.clone(),
+                        ));
+                        None
+                    } else {
+                        Some((index, program))
+                    }
+                }
                 Err(e) => {
                     diagnostics.push(error("E006", e.to_string(), block_id.clone()));
                     None

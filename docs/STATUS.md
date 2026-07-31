@@ -891,3 +891,31 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   골든과 일치했다. 375px에서 `innerWidth=375`, `clientWidth=360`,
   `scrollWidth=360`, 변수 대화상자는 좌우 10px 안에 들어왔고, 1280px에서도
   가로 넘침과 브라우저 콘솔 오류가 없었다.
+
+## 2026-07-31 대입 우변 변수 코어 진단
+
+- `compile_transitions`와 `compile_triggers`가 공유하는 `compile_assignments`에서
+  컴파일된 `Op::PushVar`를 선언된 control ID와 대조한다. 대입 대상 또는 우변
+  참조가 허용 범위를 벗어나면 block ID를 보존한 E008 error로 컴파일을
+  중단한다. `trial`은 `Op::PushTrial`이므로 계속 허용한다.
+- 수정 전 재현 모델은 `[W008, W002]`, `controlStates=1`로 검증을 통과하고
+  Exact 결과가 `counts=[0]`, 분자=분모(`P(hit=0)=1`)였다. 새 진단을 제거한
+  변이에서도 같은 결과를 확인했고, 새 transition·trigger 회귀 테스트는 각각
+  “E008이 없어 컴파일 성공”으로 실패했다. 수정 후 양쪽 모두 target `pity`,
+  reference `spent`, 원래 block ID를 담은 E008 error로 거부된다.
+- 정상 대입의 control 참조, `trial` 참조, 리터럴은 transition·trigger 양쪽에서
+  통과한다. 실행부의 fallible 평가는 컴파일 검증 뒤 방어 코드로 유지하고 그
+  이유를 주석으로 남겼다.
+- 범위 밖 조사에서 accumulator 갱신의 미지원 변수는 이미
+  `E006: accumulator 'spent' update references unsupported variable 'missing'`
+  로 컴파일 단계에서 차단됐다. 반면 미지원 `run.condition` 변수는 W002만
+  남기고 컴파일된 뒤 `condition_matches_sparse`에서 `false`가 된다. 후자는
+  엔티티 카운트 네임스페이스 검증이 필요한 독립 후속으로 남겼다.
+- `cargo test --workspace --exclude gacha-tauri`는 core 65/65를 포함해 전부
+  통과했다. 프리셋 골든 3건과 Arknights 불변식은 그대로다.
+  `npx tsc --noEmit`, UI 89/89 테스트, 현재 코어의 WASM 재빌드와 1,607개
+  모듈 프로덕션 빌드도 통과했다.
+- 프로덕션 프리뷰에서 재현 모델의 Exact 실행은 `E008 · 상태 대입 변수 오류`와
+  좌변·우변을 모두 설명하는 한국어 해결 방법을 표시하고 계산을 차단했다.
+  Arknights 프리셋은 Exact 275셀, peak 275, 결과 해시 `8728d8938924`로
+  정상 계산됐으며 브라우저 콘솔 오류는 0건이었다.
