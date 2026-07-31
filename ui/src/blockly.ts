@@ -146,12 +146,13 @@ export class GachaConnectionChecker extends Blockly.ConnectionChecker {
     const bBlock = b.getSourceBlock();
     const inheritedContext = directContext ?? contextAboveBlock(aBlock) ?? contextAboveBlock(bBlock);
     if (!inheritedContext) return true;
-    const expressionRoot = aBlock.outputConnection ? aBlock : bBlock.outputConnection ? bBlock : undefined;
-    return !expressionRoot || expressionTreeAllowed(
-      expressionRoot,
-      inheritedContext.context,
-      inheritedContext.accumulatorId,
-    );
+    return [aBlock, bBlock]
+      .filter((block) => block.outputConnection)
+      .every((root) => expressionTreeAllowed(
+        root,
+        inheritedContext.context,
+        inheritedContext.accumulatorId,
+      ));
   }
 }
 

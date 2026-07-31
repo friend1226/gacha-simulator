@@ -891,3 +891,16 @@ Netlify에 올리는 파이프라인을 구성해 첫 배포를 완료했다. �
   골든과 일치했다. 375px에서 `innerWidth=375`, `clientWidth=360`,
   `scrollWidth=360`, 변수 대화상자는 좌우 10px 안에 들어왔고, 1280px에서도
   가로 넘침과 브라우저 콘솔 오류가 없었다.
+
+## 2026-07-31 블록 에디터 B 후속 — 연결 검사 인자 순서 독립성
+
+- `GachaConnectionChecker`가 첫 번째 인자의 블록만 검사해, 이미 전이 문맥에
+  연결된 산술식 내부 소켓을 부모 우선 순서로 검사하면 accumulator 참조가
+  통과하는 결함을 수정했다. 연결 양쪽의 출력 트리를 모두 검사하므로 호출
+  순서와 무관하게 같은 안전 속성이 성립한다.
+- 수정 전 새 회귀 테스트는
+  `rooted insertion parentFirst: expected true to be false`로 실패했다.
+  수정 후 직접 연결·중첩 연결·완성 식 이동·연결된 식 내부 삽입 네 경우를
+  자식 우선과 부모 우선 양쪽에서 모두 거부한다. 실제 부모 우선 `connect()`도
+  accumulator를 붙이지 않고 기존 `pity + 1` 식을 보존한다.
+- `npx tsc --noEmit --pretty false`와 UI 88/88 테스트가 통과했다.
