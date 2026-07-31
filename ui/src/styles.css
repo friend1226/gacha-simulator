@@ -60,6 +60,7 @@ button { cursor: pointer; }
 .status.good { color: #65d6a4; background: #18352c; }
 .status.bad { color: #ff8796; background: #3b2027; }
 .leaf-list, .analysis { padding: 12px 18px; border-bottom: 1px solid #282e3a; }
+.preview-caption { margin: 0 0 7px; color: #737d8e; font-size: 10px; }
 .leaf-row, .total, .metric { display: flex; align-items: center; justify-content: space-between; min-height: 38px; }
 .leaf-row span { font-size: 13px; }
 .leaf-row small { display: block; color: #687183; font: 10px "IBM Plex Mono", monospace; }
@@ -161,6 +162,24 @@ button { cursor: pointer; }
 .blocklyToolboxDiv { border-right: 1px solid #292f3a !important; }
 .blocklyTreeRow { height: 38px !important; padding: 0 12px !important; margin: 3px 7px !important; border-radius: 7px; }
 .blocklyTreeLabel { font-family: "Noto Sans KR", sans-serif !important; font-size: 12px !important; }
+.dialog-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(5,7,10,.72); }
+.variable-dialog { width: min(620px, 100%); max-height: calc(100dvh - 40px); overflow: auto; border: 1px solid #3a4251; border-radius: 13px; background: #171b24; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+.variable-dialog > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 20px 22px 15px; border-bottom: 1px solid #2c323e; }
+.variable-dialog h2 { margin: 0; font-size: 19px; }
+.variable-dialog header p { margin: 5px 0 0; color: #8e98a9; font-size: 11px; }
+.variable-dialog header button { width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: #929bab; font-size: 23px; line-height: 1; }
+.variable-dialog header button:hover { background: #252b36; }
+.variable-dialog form { padding: 18px 22px 22px; }
+.variable-dialog label { display: grid; gap: 6px; color: #9da6b6; font-size: 11px; }
+.variable-dialog input, .variable-dialog select { width: 100%; min-width: 0; padding: 8px 9px; border: 1px solid #363d4b; border-radius: 7px; background: #20252f; }
+.variable-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; margin-top: 14px; }
+.variable-dialog-note { margin: 13px 0 0; color: #8f98a8; font-size: 11px; line-height: 1.55; }
+.variable-dialog-error { margin: 12px 0 0; padding: 9px 10px; border: 1px solid #74424d; border-radius: 7px; background: #332027; color: #ff9dad; font-size: 11px; }
+.variable-dialog footer { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+.variable-dialog footer span { flex: 1; }
+.variable-dialog footer button { min-height: 35px; padding: 0 13px; border: 1px solid #414957; border-radius: 7px; background: #252b36; }
+.variable-dialog footer .primary { border-color: #725be2; background: #725be2; }
+.variable-dialog footer .danger { border-color: #70404d; background: #3b242c; color: #ffb5c8; }
 
 @media (max-width: 1100px) {
   .app-header { gap: 8px; padding: 0 10px; }
@@ -197,4 +216,8 @@ button { cursor: pointer; }
   .mobile-block-notice span { flex: 1; }
   .mobile-block-notice button { flex: 0 0 auto; display: grid; place-items: center; width: 28px; height: 28px; margin: -4px -6px 0 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #bcb5e7; }
   .mobile-block-notice button:hover { background: rgba(255,255,255,.08); }
+  .dialog-backdrop { padding: 10px; }
+  .variable-dialog { max-height: calc(100dvh - 20px); }
+  .variable-dialog > header, .variable-dialog form { padding-left: 16px; padding-right: 16px; }
+  .variable-form-grid { grid-template-columns: 1fr; }
 }

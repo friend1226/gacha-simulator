@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, FlaskConical, RotateCcw, Save, Settings, Upload } from "lucide-react";
-import { Blockly, getUnsupportedBlockItems, installWorkspaceVolume, loadIr, toolbox, workspaceToIr, type UnsupportedBlockItem } from "./blockly";
+import {
+  Blockly,
+  GachaConnectionChecker,
+  deleteWorkspaceVariable,
+  getUnsupportedBlockItems,
+  installVariableToolbox,
+  installWorkspaceVolume,
+  listWorkspaceVariables,
+  loadIr,
+  refreshVariableToolbox,
+  saveWorkspaceVariable,
+  toolbox,
+  workspaceToIr,
+  type UnsupportedBlockItem,
+  type WorkspaceVariableDefinition,
+} from "./blockly";
 import { EngineCancelledError, loadEngineBackend, runDpJson, type EngineBackend, type EngineProgress } from "./engine";
 import { parseEngineError, type EngineErrorPresentation } from "./engineDiagnostics";
 import { confidenceLabel as confidenceLabelFor } from "./labels";
@@ -14,6 +29,7 @@ import { HelpPanel } from "./panels/HelpPanel";
 import { ModelPanel } from "./panels/ModelPanel";
 import { ResultPanel } from "./panels/ResultPanel";
 import { SettingsPanel } from "./panels/SettingsPanel";
+import { VariableDialog } from "./panels/VariableDialog";
 import { MODEL_STORAGE } from "./storage";
 
 type TopTab = "model" | "results" | "help" | "settings";
@@ -50,6 +66,9 @@ export function App() {
   const [topTab, setTopTab] = useState<TopTab>("model");
   const [editorTab, setEditorTab] = useState<"blocks" | "json">("blocks");
   const [unsupportedBlockItems, setUnsupportedBlockItems] = useState<UnsupportedBlockItem[]>([]);
+  const [variableDialog, setVariableDialog] = useState<{
+    initialRole?: "control" | "accumulator";
+  }>();
   const [showMobileBlockNotice, setShowMobileBlockNotice] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const settingsRef = useRef(settings);
@@ -118,15 +137,24 @@ export function App() {
       grid: { spacing: 24, length: 3, colour: "#2a303d", snap: true },
       zoom: { controls: true, wheel: true, startScale: 0.8 },
       trashcan: true,
+      plugins: { connectionChecker: GachaConnectionChecker },
     });
     workspace.current = ws;
     installWorkspaceVolume(ws, () => settingsRef.current.soundVolume);
+    installVariableToolbox(ws, {
+      create: (role) => setVariableDialog({ initialRole: role }),
+      manage: () => setVariableDialog({}),
+    });
     setUnsupportedBlockItems(loadIr(ws, modelRef.current));
+    refreshVariableToolbox(ws);
     const listener = (event: Blockly.Events.Abstract) => {
       if (event.isUiEvent) return;
-      const next = workspaceToIr(ws, modelRef.current);
-      setModelSynced(next, false, "blockEdit");
-      setUnsupportedBlockItems(getUnsupportedBlockItems(ws));
+      if (event.type === Blockly.Events.VAR_CREATE
+        || event.type === Blockly.Events.VAR_DELETE
+        || event.type === Blockly.Events.VAR_RENAME) {
+        refreshVariableToolbox(ws);
+      }
+      syncWorkspaceModel(ws);
     };
     ws.addChangeListener(listener);
     const resize = () => Blockly.svgResize(ws);
@@ -157,7 +185,39 @@ export function App() {
     }
     if (reloadBlocks && workspace.current) {
       setUnsupportedBlockItems(loadIr(workspace.current, next));
+      refreshVariableToolbox(workspace.current);
     }
+  }
+
+  function syncWorkspaceModel(ws = workspace.current) {
+    if (!ws) return;
+    const next = workspaceToIr(ws, modelRef.current);
+    setModelSynced(next, false, "blockEdit");
+    setUnsupportedBlockItems(getUnsupportedBlockItems(ws));
+  }
+
+  function saveVariable(
+    draft: Omit<WorkspaceVariableDefinition, "variableId">,
+    variableId?: string,
+  ) {
+    const ws = workspace.current;
+    if (!ws) return "블록 워크스페이스가 준비되지 않았습니다.";
+    try {
+      saveWorkspaceVariable(ws, draft, variableId);
+      refreshVariableToolbox(ws);
+      syncWorkspaceModel(ws);
+      return undefined;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  function deleteVariable(variableId: string) {
+    const ws = workspace.current;
+    if (!ws) return;
+    deleteWorkspaceVariable(ws, variableId);
+    refreshVariableToolbox(ws);
+    syncWorkspaceModel(ws);
   }
 
   function applyJson() {
@@ -336,6 +396,15 @@ export function App() {
         {topTab === "help" && <HelpPanel focusCode={helpCode} />}
         {topTab === "settings" && <SettingsPanel settings={settings} update={updateSettings} />}
       </main>
+      {variableDialog && (
+        <VariableDialog
+          variables={workspace.current ? listWorkspaceVariables(workspace.current) : []}
+          initialRole={variableDialog.initialRole}
+          onSave={saveVariable}
+          onDelete={deleteVariable}
+          onClose={() => setVariableDialog(undefined)}
+        />
+      )}
     </div>
   );
 }
