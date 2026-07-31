@@ -423,26 +423,52 @@ describe("Blockly variable menu and expression contexts", () => {
       const transition = workspace.newBlock("transition_set");
       transition.setFieldValue(control.variableId, "VAR");
       const transitionInput = transition.getInput("VALUE")!.connection!;
+      const orders = ["childFirst", "parentFirst"] as const;
 
       const direct = variableReference(workspace, accumulator.variableId);
-      expect(canConnect(workspace, direct, transitionInput)).toBe(false);
+      for (const order of orders) {
+        expect(canConnect(workspace, direct, transitionInput, order), `direct ${order}`)
+          .toBe(false);
+      }
 
       const nested = workspace.newBlock("expr_arithmetic");
       nested.getInput("LEFT")!.connection!.connect(
         variableReference(workspace, accumulator.variableId).outputConnection!,
       );
-      expect(canConnect(workspace, nested, transitionInput)).toBe(false);
+      for (const order of orders) {
+        expect(canConnect(workspace, nested, transitionInput, order), `nested ${order}`)
+          .toBe(false);
+      }
 
       const completed = workspace.newBlock("expr_arithmetic");
       completed.getInput("RIGHT")!.connection!.connect(
         variableReference(workspace, accumulator.variableId).outputConnection!,
       );
-      expect(canConnect(workspace, completed, transitionInput)).toBe(false);
+      for (const order of orders) {
+        expect(canConnect(workspace, completed, transitionInput, order), `moved ${order}`)
+          .toBe(false);
+      }
 
       const rooted = workspace.newBlock("expr_arithmetic");
       transitionInput.connect(rooted.outputConnection!);
+      rooted.getInput("LEFT")!.connection!.connect(
+        variableReference(workspace, control.variableId).outputConnection!,
+      );
+      const originalRight = workspace.newBlock("expr_literal");
+      originalRight.setFieldValue("1", "VALUE");
+      const innerInput = rooted.getInput("RIGHT")!.connection!;
+      innerInput.connect(originalRight.outputConnection!);
       const insertion = variableReference(workspace, accumulator.variableId);
-      expect(canConnect(workspace, insertion, rooted.getInput("LEFT")!.connection!)).toBe(false);
+      for (const order of orders) {
+        expect(canConnect(workspace, insertion, innerInput, order), `rooted insertion ${order}`)
+          .toBe(false);
+      }
+      innerInput.connect(insertion.outputConnection!);
+      expect(innerInput.targetBlock()).toBe(originalRight);
+      expect(insertion.getParent()).toBeNull();
+      expect(blockToExpr(rooted)).toEqual({
+        add: [{ var: "pity" }, { lit: "1" }],
+      });
     } finally {
       workspace.dispose();
     }
@@ -798,8 +824,11 @@ function canConnect(
   workspace: Blockly.Workspace,
   block: Blockly.Block,
   input: Blockly.Connection,
+  order: "childFirst" | "parentFirst" = "childFirst",
 ) {
-  return workspace.connectionChecker.canConnect(block.outputConnection, input, false);
+  return order === "childFirst"
+    ? workspace.connectionChecker.canConnect(block.outputConnection, input, false)
+    : workspace.connectionChecker.canConnect(input, block.outputConnection, false);
 }
 
 function minimalModel(entityId: string): ModelIr {
