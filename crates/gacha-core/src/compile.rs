@@ -1,4 +1,4 @@
-use crate::expr::{compile_expr, eval, Op, Program};
+use crate::expr::{compile_expr, eval, ExprError, Op, Program};
 use crate::ir::{
     ClampPolicy, Entity, Grant, LeafPredicate, ModelIr, NestingPolicy, NumericBackend, StateRole,
     Transition, TrialSeriesMode, Trigger,
@@ -83,6 +83,7 @@ const ACCUMULATOR_TABLE_WARNING_ENTRIES: u128 = 500_000;
 const ACCUMULATOR_TABLE_MAX_ENTRIES: u128 = 10_000_000;
 const PROBABILITY_TABLE_WARNING_ENTRIES: u128 = 500_000;
 const PROBABILITY_TABLE_MAX_ENTRIES: u128 = 10_000_000;
+const ASSIGNMENT_CHECK_MAX_CONTROLS: usize = 100_000;
 pub const DP_CONTROL_STATE_LIMIT: u64 = 10_000_000;
 pub const DP_ESTIMATED_STATE_LIMIT: u64 = 50_000_000;
 
@@ -97,6 +98,7 @@ pub enum TrackedDimension {
 pub struct CompiledTransition {
     pub predicate: CompiledPredicate,
     pub assignments: Vec<(usize, Program)>,
+    pub block_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +125,7 @@ pub struct CompiledTrigger {
     pub trial_count: u32,
     pub grant: Option<CompiledGrant>,
     pub assignments: Vec<(usize, Program)>,
+    pub block_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -355,8 +358,8 @@ impl CompiledModel {
             let action_trial = trial + consumed;
             let before = control.to_vec();
             for (index, program) in &trigger.assignments {
-                // Assignment references are compile-time validated; keep this fallible
-                // evaluation as a defensive runtime guard.
+                // References are validated at compile time. A value-dependent failure such as
+                // division by zero skips this assignment and is reported as W011.
                 if let Ok(value) = eval(
                     program,
                     |name| {
@@ -369,11 +372,7 @@ impl CompiledModel {
                 )
                 .and_then(|v| v.number())
                 {
-                    control[*index] = value
-                        .to_integer()
-                        .to_u32()
-                        .unwrap_or(u32::MAX)
-                        .min(self.control_max[*index]);
+                    control[*index] = assignment_value(&value, self.control_max[*index]);
                 }
             }
             if let Some(grant) = &trigger.grant {
@@ -464,8 +463,8 @@ impl CompiledModel {
             let action_trial = trial + consumed;
             let before = control.to_vec();
             for (index, program) in &trigger.assignments {
-                // Assignment references are compile-time validated; keep this fallible
-                // evaluation as a defensive runtime guard.
+                // References are validated at compile time. A value-dependent failure such as
+                // division by zero skips this assignment and is reported as W011.
                 if let Ok(value) = eval(
                     program,
                     |name| {
@@ -478,11 +477,7 @@ impl CompiledModel {
                 )
                 .and_then(|v| v.number())
                 {
-                    control[*index] = value
-                        .to_integer()
-                        .to_u32()
-                        .unwrap_or(u32::MAX)
-                        .min(self.control_max[*index]);
+                    control[*index] = assignment_value(&value, self.control_max[*index]);
                 }
             }
             if let Some(grant) = &trigger.grant {
@@ -514,6 +509,15 @@ impl CompiledModel {
     }
 }
 
+fn assignment_value(value: &Rational, max: u32) -> u32 {
+    let integer = value.to_integer();
+    if integer.is_negative() {
+        0
+    } else {
+        integer.to_u32().unwrap_or(u32::MAX).min(max)
+    }
+}
+
 fn apply_compiled_transitions(
     transitions: &[CompiledTransition],
     control_ids: &[String],
@@ -528,8 +532,8 @@ fn apply_compiled_transitions(
             continue;
         }
         for (index, program) in &transition.assignments {
-            // Assignment references are compile-time validated; keep this fallible
-            // evaluation as a defensive runtime guard.
+            // References are validated at compile time. A value-dependent failure such as
+            // division by zero skips this assignment and is reported as W011.
             if let Ok(value) = eval(
                 program,
                 |name| {
@@ -542,12 +546,7 @@ fn apply_compiled_transitions(
             )
             .and_then(|v| v.number())
             {
-                let next = value
-                    .to_integer()
-                    .to_i64()
-                    .unwrap_or(i64::MAX)
-                    .clamp(0, control_max[*index] as i64);
-                control[*index] = next as u32;
+                control[*index] = assignment_value(&value, control_max[*index]);
             }
         }
     }
@@ -794,6 +793,21 @@ pub fn compile(ir: &ModelIr) -> Result<CompiledModel, CompileError> {
     } else {
         vec![initial_control_index]
     };
+    diagnose_assignment_failures(
+        &transitions,
+        &triggers,
+        &control_ids,
+        &control_init,
+        &control_max,
+        leaves.len(),
+        transition_trial_dependent,
+        ir.run.max_trials,
+        probability_control_dependent.then_some(probability_control_indices.as_slice()),
+        &mut diagnostics,
+    );
+    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        return Err(CompileError { diagnostics });
+    }
     let probability_table_controls = probability_control_indices.len() as u64;
     if !push_probability_table_size_diagnostic(
         probability_table_controls,
@@ -1910,6 +1924,132 @@ fn reachable_control_indices(
     Ok(reachable.into_iter().collect())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn diagnose_assignment_failures(
+    transitions: &[CompiledTransition],
+    triggers: &[CompiledTrigger],
+    control_ids: &[String],
+    control_init: &[u32],
+    control_max: &[u32],
+    leaf_count: usize,
+    transition_trial_dependent: bool,
+    max_trials: u32,
+    known_reachable: Option<&[usize]>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let has_assignments = transitions.iter().any(|t| !t.assignments.is_empty())
+        || triggers.iter().any(|t| !t.assignments.is_empty());
+    if !has_assignments {
+        return;
+    }
+    let discovered;
+    let controls = match known_reachable {
+        Some(controls) => controls,
+        None => {
+            // Past the limit only the initial state is checked; see DESIGN §13.
+            discovered = reachable_control_indices(
+                transitions,
+                control_ids,
+                control_init,
+                control_max,
+                leaf_count,
+                transition_trial_dependent,
+                triggers,
+                max_trials,
+                ASSIGNMENT_CHECK_MAX_CONTROLS,
+            )
+            .unwrap_or_else(|_| vec![encode_control(control_init, control_max)]);
+            discovered.as_slice()
+        }
+    };
+    let controls: Vec<Vec<u32>> = controls
+        .iter()
+        .map(|index| decode_control(*index as u64, control_max))
+        .collect();
+    let last_trial = max_trials.max(1);
+    for transition in transitions {
+        for (index, program) in &transition.assignments {
+            let trials = 1..=if program.trial_dependent {
+                last_trial
+            } else {
+                1
+            };
+            push_assignment_failure(
+                program,
+                &control_ids[*index],
+                control_ids,
+                &controls,
+                trials,
+                transition.block_id.as_ref(),
+                diagnostics,
+            );
+        }
+    }
+    for trigger in triggers
+        .iter()
+        .filter(|trigger| (1..=max_trials).contains(&trigger.trial_count))
+    {
+        for (index, program) in &trigger.assignments {
+            push_assignment_failure(
+                program,
+                &control_ids[*index],
+                control_ids,
+                &controls,
+                trigger.trial_count..=trigger.trial_count,
+                trigger.block_id.as_ref(),
+                diagnostics,
+            );
+        }
+    }
+}
+
+fn push_assignment_failure(
+    program: &Program,
+    target: &str,
+    control_ids: &[String],
+    controls: &[Vec<u32>],
+    trials: std::ops::RangeInclusive<u32>,
+    block_id: Option<&String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for trial in trials {
+        for control in controls {
+            let result = eval(
+                program,
+                |name| {
+                    control_ids
+                        .iter()
+                        .position(|id| id == name)
+                        .map(|i| Rational::from_integer(control[i].into()))
+                },
+                trial,
+            )
+            .and_then(|value| value.number());
+            match result {
+                Ok(_) => {}
+                Err(ExprError::DivisionByZero) => {
+                    diagnostics.push(warning(
+                        "W011",
+                        format!(
+                            "assignment to '{target}' can divide by zero in a reachable control state and is skipped when it does"
+                        ),
+                        block_id.cloned(),
+                    ));
+                    return;
+                }
+                Err(e) => {
+                    diagnostics.push(error(
+                        "E006",
+                        format!("assignment to '{target}' cannot be evaluated: {e}"),
+                        block_id.cloned(),
+                    ));
+                    return;
+                }
+            }
+        }
+    }
+}
+
 fn compiled_consumed_trials_after(
     triggers: &[CompiledTrigger],
     trial: u32,
@@ -1946,8 +2086,8 @@ fn apply_compiled_triggers_to_control(
         let action_trial = trial + consumed;
         let before = control.to_vec();
         for (index, program) in &trigger.assignments {
-            // Assignment references are compile-time validated; keep this fallible
-            // evaluation as a defensive runtime guard.
+            // References are validated at compile time. A value-dependent failure such as
+            // division by zero skips this assignment and is reported as W011.
             if let Ok(value) = eval(
                 program,
                 |name| {
@@ -1960,11 +2100,7 @@ fn apply_compiled_triggers_to_control(
             )
             .and_then(|value| value.number())
             {
-                control[*index] = value
-                    .to_integer()
-                    .to_u32()
-                    .unwrap_or(u32::MAX)
-                    .min(control_max[*index]);
+                control[*index] = assignment_value(&value, control_max[*index]);
             }
         }
         if let Some(grant) = &trigger.grant {
@@ -2078,6 +2214,7 @@ fn compile_transitions(
             Some(CompiledTransition {
                 predicate,
                 assignments,
+                block_id: transition.block_id.clone(),
             })
         })
         .collect()
@@ -2427,6 +2564,7 @@ fn compile_triggers(
                 trial_count: trigger.at.trial_count,
                 grant,
                 assignments,
+                block_id: trigger.block_id.clone(),
             })
         })
         .collect()

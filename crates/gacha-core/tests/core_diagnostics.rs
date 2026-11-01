@@ -184,6 +184,126 @@ fn assignment_rhs_accepts_control_trial_and_literal_expressions() {
         .any(|diagnostic| diagnostic.code == "E008"));
 }
 
+fn hit_after_two_pity_model(transitions: Value, triggers: Value) -> ModelIr {
+    let mut ir = base_model(
+        json!({
+            "if": {"ge": [{"var": "pity"}, {"lit": "2"}]},
+            "then": {"lit": "1"},
+            "else": {"lit": "0"}
+        }),
+        vec![json!({"id": "pity", "init": 0, "max": 5, "role": "control"})],
+    );
+    ir.transitions = serde_json::from_value(transitions).expect("transitions must deserialize");
+    ir.triggers = serde_json::from_value(triggers).expect("triggers must deserialize");
+    ir.run.max_trials = 3;
+    ir
+}
+
+fn only_hit_count(ir: &ModelIr) -> Vec<u32> {
+    let model = compile(ir).expect("model must compile");
+    let result = run_dp(&model, DpOptions::default(), |_, _| true).expect("DP must run");
+    let DpRunResult::Approximate(result) = result else {
+        panic!("scaled model must use approximate DP");
+    };
+    assert_eq!(result.joint.len(), 1);
+    result.joint[0].counts.clone()
+}
+
+#[test]
+fn negative_assignments_clamp_to_zero_for_transitions_and_triggers() {
+    let minus_one = json!({"sub": [{"var": "pity"}, {"lit": "1"}]});
+    let transition = hit_after_two_pity_model(
+        json!([{"when": {"leafIs": "__other__"}, "set": {"pity": minus_one}}]),
+        json!([]),
+    );
+    let trigger = hit_after_two_pity_model(
+        json!([]),
+        json!([{"at": {"trialCount": 1}, "set": {"pity": minus_one}}]),
+    );
+    assert_eq!(only_hit_count(&transition), vec![0]);
+    assert_eq!(only_hit_count(&trigger), vec![0]);
+}
+
+#[test]
+fn w011_reports_reachable_division_by_zero_in_assignment() {
+    let ir = hit_after_two_pity_model(
+        json!([{
+            "when": {"leafIs": "__other__"},
+            "set": {"pity": {"div": [{"lit": "5"}, {"var": "pity"}]}},
+            "blockId": "division-block"
+        }]),
+        json!([]),
+    );
+    let model = compile(&ir).expect("division by zero stays a warning");
+    let diagnostic = model
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "W011")
+        .expect("reachable division by zero must produce W011");
+    assert_eq!(diagnostic.severity, Severity::Warning);
+    assert_eq!(diagnostic.block_id.as_deref(), Some("division-block"));
+}
+
+#[test]
+fn w011_ignores_guarded_and_unreachable_division() {
+    let guarded = hit_after_two_pity_model(
+        json!([{
+            "when": {"leafIs": "__other__"},
+            "set": {"pity": {
+                "if": {"gt": [{"var": "pity"}, {"lit": "0"}]},
+                "then": {"div": [{"lit": "5"}, {"var": "pity"}]},
+                "else": {"lit": "1"}
+            }}
+        }]),
+        json!([]),
+    );
+    let model = compile(&guarded).expect("guarded division must compile");
+    assert!(!model.diagnostics.iter().any(|d| d.code == "W011"));
+
+    let mut unreachable = hit_after_two_pity_model(
+        json!([{
+            "when": {"leafIs": "__other__"},
+            "set": {"pity": {"div": [{"lit": "5"}, {"var": "pity"}]}}
+        }]),
+        json!([]),
+    );
+    unreachable.state_vars[0].init = 5;
+    let model = compile(&unreachable).expect("unreachable division must compile");
+    assert!(!model.diagnostics.iter().any(|d| d.code == "W011"));
+}
+
+#[test]
+fn e006_rejects_boolean_assignment_value() {
+    let boolean = json!({"ge": [{"var": "pity"}, {"lit": "0"}]});
+    for ir in [
+        hit_after_two_pity_model(
+            json!([{
+                "when": {"leafIs": "__other__"},
+                "set": {"pity": boolean},
+                "blockId": "boolean-block"
+            }]),
+            json!([]),
+        ),
+        hit_after_two_pity_model(
+            json!([]),
+            json!([{
+                "at": {"trialCount": 1},
+                "set": {"pity": boolean},
+                "blockId": "boolean-block"
+            }]),
+        ),
+    ] {
+        let error = compile(&ir).expect_err("boolean assignment must fail compilation");
+        let diagnostic = error
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E006")
+            .expect("boolean assignment must produce E006");
+        assert_eq!(diagnostic.block_id.as_deref(), Some("boolean-block"));
+        assert!(diagnostic.message.contains("pity"));
+    }
+}
+
 #[test]
 fn e002_uses_control_bounds_without_false_positive_for_correlated_terms() {
     let state_vars = vec![json!({
